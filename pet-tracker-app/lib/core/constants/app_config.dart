@@ -2,7 +2,7 @@ class AppConfig {
   static const apiPrefix = '/api/v1';
   static const defaultBaseUrl = String.fromEnvironment(
     'PET_TRACKER_API_URL',
-    defaultValue: 'http://192.168.0.47:8000',
+    defaultValue: 'https://pet-tracker-backend-gamma.vercel.app',
   );
 
   // Web/desktop local dev: http://127.0.0.1:8000
