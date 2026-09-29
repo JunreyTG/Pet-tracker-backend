@@ -17,7 +17,7 @@ class Settings(BaseSettings):
         "http://localhost:5000",
         "http://127.0.0.1:5000",
     ]
-    cors_origin_regex: str | None = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+    cors_origin_regex: str | None = r".*"
     auth_token_secret: str = "change-this-dev-secret"
     auth_token_ttl_seconds: int = Field(default=60 * 60 * 24 * 7, gt=0)
     device_offline_threshold_seconds: int = Field(default=300, gt=0)

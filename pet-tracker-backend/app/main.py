@@ -105,6 +105,12 @@ def create_app() -> FastAPI:
             filename="pet-tracker-release.apk",
         )
 
+    from fastapi.staticfiles import StaticFiles
+
+    web_dir = Path(__file__).resolve().parent.parent / "web"
+    if web_dir.exists() and web_dir.is_dir():
+        app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="web")
+
     return app
 
 

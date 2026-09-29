@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -33,16 +31,14 @@ class NotificationService extends GetxService {
 
   String get _platformName {
     if (kIsWeb) return 'android';
-    return Platform.isIOS ? 'ios' : 'android';
+    return defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android';
   }
 
   String get _deviceName {
     if (kIsWeb) return 'Web Browser';
-    try {
-      return Platform.localHostname;
-    } catch (_) {
-      return 'Mobile Device';
-    }
+    return defaultTargetPlatform == TargetPlatform.iOS
+        ? 'iOS Device'
+        : 'Android Device';
   }
 
   Future<void> _initLocalNotifications() async {
@@ -79,6 +75,7 @@ class NotificationService extends GetxService {
     try {
       if (kIsWeb) {
         debugPrint('FCM push notifications: Web browser environment detected.');
+        return;
       }
       await _initLocalNotifications();
 
