@@ -23,7 +23,28 @@ class AppScaffold extends StatelessWidget {
     final surfaceColor = Theme.of(context).colorScheme.surface;
     return Scaffold(
       extendBody: true,
-      appBar: AppBar(title: Text(title), actions: actions, toolbarHeight: 70),
+      appBar: AppBar(
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.asset(
+              'assets/images/app_icon.png',
+              width: 34,
+              height: 34,
+              fit: BoxFit.contain,
+            ),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                title,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        actions: actions,
+        toolbarHeight: 70,
+      ),
       body: child,
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),

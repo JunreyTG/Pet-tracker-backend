@@ -1,11 +1,11 @@
 {
-    "name": "pet_tracker_app",
-    "short_name": "pet_tracker_app",
+    "name": "Pet Tracker",
+    "short_name": "Pet Tracker",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0F172A",
+    "theme_color": "#FF4B3E",
+    "description": "Pet Tracker - Real-time GPS tracking and smart safe zones for your pets.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

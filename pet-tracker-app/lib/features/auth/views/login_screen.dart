@@ -264,13 +264,26 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Text(
-                              'Welcome to Pet Tracker',
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w900,
-                              ),
+                            Row(
+                              children: [
+                                Image.asset(
+                                  'assets/images/app_icon.png',
+                                  width: 46,
+                                  height: 46,
+                                  fit: BoxFit.contain,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    'Pet Tracker',
+                                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 10),
                             Text(
                               'Keep your pets safe and sound with real-time location monitoring and boundary alerts.',
                               style: Theme.of(context).textTheme.bodySmall,
