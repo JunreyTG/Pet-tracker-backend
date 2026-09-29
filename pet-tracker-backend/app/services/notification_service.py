@@ -119,9 +119,9 @@ class NotificationService:
                             priority="high",
                         ),
                     ),
-                    apns=messaging.ApnsConfig(
+                    apns=messaging.APNSConfig(
                         headers={"apns-priority": "10"},
-                        payload=messaging.ApnsPayload(
+                        payload=messaging.APNSPayload(
                             aps=messaging.Aps(
                                 sound="default",
                                 badge=1,

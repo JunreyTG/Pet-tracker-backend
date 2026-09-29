@@ -10,7 +10,9 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     debug: bool = False
     firebase_credentials_path: Path = Path(".credentials/firebase-service-account.json")
+    firebase_service_account_json: str | None = None
     firebase_project_id: str | None = None
+    apk_download_url: str | None = None
     cors_origins: list[str] = [
         "http://localhost:5000",
         "http://127.0.0.1:5000",

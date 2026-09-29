@@ -79,17 +79,28 @@ def create_app() -> FastAPI:
     app.include_router(notifications_router)
     app.include_router(places_router)
 
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, RedirectResponse
     from pathlib import Path
 
     @app.get("/download-apk")
     def download_apk():
-        apk_path = Path(r"c:\Users\Admin\Desktop\Pet_tracker_system\pet-tracker-release.apk")
-        if not apk_path.exists():
+        if settings.apk_download_url:
+            return RedirectResponse(settings.apk_download_url)
+
+        candidates = [
+            Path("pet-tracker-release.apk"),
+            Path("../pet-tracker-release.apk"),
+            Path(r"c:\Users\Admin\Desktop\Pet_tracker_system\pet-tracker-release.apk"),
+        ]
+        found = next((p for p in candidates if p.exists() and p.is_file()), None)
+        if not found:
             from fastapi import HTTPException
-            raise HTTPException(status_code=404, detail="APK not found")
+            raise HTTPException(
+                status_code=404,
+                detail="APK not found. Please set APK_DOWNLOAD_URL or place pet-tracker-release.apk in root.",
+            )
         return FileResponse(
-            apk_path,
+            found,
             media_type="application/vnd.android.package-archive",
             filename="pet-tracker-release.apk",
         )
