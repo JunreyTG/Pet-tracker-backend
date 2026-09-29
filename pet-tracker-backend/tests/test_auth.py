@@ -75,21 +75,16 @@ def test_auth_me_rejects_token_with_extra_whitespace() -> None:
     assert response.status_code == 401
 
 
-def test_auth_me_rejects_invalid_token(monkeypatch) -> None:
-    def fake_verify(token: str) -> dict[str, Any]:
-        raise auth_service._unauthorized()
-
-    monkeypatch.setattr(auth_service, "verify_firebase_id_token", fake_verify)
-
+def test_auth_me_rejects_invalid_token() -> None:
     response = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer invalid"})
 
     assert response.status_code == 401
 
 
 def test_auth_me_returns_authenticated_user_information(monkeypatch) -> None:
-    def fake_verify(token: str) -> dict[str, Any]:
+    def fake_verify(token: str) -> AuthenticatedUser:
         assert token == "valid-token"
-        return {"uid": "firebase-user-1", "email": "owner@example.com", "name": "Owner"}
+        return AuthenticatedUser(uid="user-1", email="owner@example.com", display_name="Owner")
 
     def fake_sync(user: AuthenticatedUser) -> dict[str, Any]:
         return {
@@ -98,17 +93,56 @@ def test_auth_me_returns_authenticated_user_information(monkeypatch) -> None:
             "display_name": user.display_name,
         }
 
-    monkeypatch.setattr(auth_service, "verify_firebase_id_token", fake_verify)
+    monkeypatch.setattr(auth_service, "verify_access_token", fake_verify)
     monkeypatch.setattr("app.api.auth.sync_current_user_profile", fake_sync)
 
     response = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer valid-token"})
 
     assert response.status_code == 200
     assert response.json() == {
-        "uid": "firebase-user-1",
+        "uid": "user-1",
         "email": "owner@example.com",
         "display_name": "Owner",
     }
+
+
+def test_register_returns_token_and_user(monkeypatch) -> None:
+    def fake_register(name: str, email: str, password: str) -> AuthenticatedUser:
+        assert (name, email, password) == ("Owner", "owner@example.com", "secret123")
+        return AuthenticatedUser(uid="user-1", email=email, display_name=name)
+
+    monkeypatch.setattr("app.api.auth.register_with_password", fake_register)
+    monkeypatch.setattr("app.api.auth.create_access_token", lambda user: f"token-for-{user.uid}")
+
+    response = client.post(
+        "/api/v1/auth/register",
+        json={"name": "Owner", "email": "owner@example.com", "password": "secret123"},
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "access_token": "token-for-user-1",
+        "token_type": "bearer",
+        "user": {"uid": "user-1", "email": "owner@example.com", "display_name": "Owner"},
+    }
+
+
+def test_login_returns_token_and_user(monkeypatch) -> None:
+    def fake_authenticate(email: str, password: str) -> AuthenticatedUser:
+        assert (email, password) == ("owner@example.com", "secret123")
+        return AuthenticatedUser(uid="user-1", email=email, display_name="Owner")
+
+    monkeypatch.setattr("app.api.auth.authenticate_with_password", fake_authenticate)
+    monkeypatch.setattr("app.api.auth.create_access_token", lambda user: f"token-for-{user.uid}")
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "owner@example.com", "password": "secret123"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["access_token"] == "token-for-user-1"
+    assert response.json()["user"]["email"] == "owner@example.com"
 
 
 def test_health_remains_public() -> None:

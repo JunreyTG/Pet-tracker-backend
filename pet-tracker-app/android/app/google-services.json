@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "504056122041",
+    "project_id": "pet-tracker-d3663",
+    "storage_bucket": "pet-tracker-d3663.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:504056122041:android:e35bdef9cd8f7e9c712968",
+        "android_client_info": {
+          "package_name": "pet_tracker.com"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "504056122041-vi12j4oltej6qp93r3ta4fsfju06fdl0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA06wR8-rN8GwUJq1s1NyioBgTm-bieZr8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "504056122041-vi12j4oltej6qp93r3ta4fsfju06fdl0.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

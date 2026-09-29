@@ -72,6 +72,7 @@ New-Item -ItemType Directory -Path .credentials
 FIREBASE_CREDENTIALS_PATH=".credentials/firebase-service-account.json"
 FIREBASE_PROJECT_ID="your-firebase-project-id"
 DEVICE_OFFLINE_THRESHOLD_SECONDS=300
+DEVICE_HEARTBEAT_CHECK_INTERVAL_SECONDS=60
 LOW_BATTERY_THRESHOLD_PERCENT=20
 ```
 
@@ -94,6 +95,18 @@ The boundary is strict: a device is marked offline only when `current UTC time -
 Devices with `last_seen = null`, `unregistered` devices, and `disabled` devices are skipped. Heartbeat checking does not update `last_seen`; only successful device communication such as telemetry updates it.
 
 Offline detection can create persistent alerts and FCM notifications. It does not run geofence checks.
+
+The FastAPI app starts a best-effort in-process heartbeat loop on startup and stops it during shutdown. This is suitable for local development and simple single-worker deployments. For multi-worker production deployments, use a single external scheduler/worker to avoid duplicate checks.
+
+## Location History
+
+Telemetry writes are available to authenticated pet owners through:
+
+```text
+GET /api/v1/pets/{pet_id}/location-history?limit=100&start_time=2026-09-25T00:00:00Z&end_time=2026-09-25T23:59:59Z
+```
+
+The endpoint verifies pet ownership from the Firebase UID, never trusts client-supplied ownership, returns records chronologically, and caps `limit` at 500.
 
 ## Geofencing / Safe Zones
 

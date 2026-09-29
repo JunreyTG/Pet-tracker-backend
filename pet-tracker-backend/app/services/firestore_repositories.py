@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any, Generic, TypeVar
 
 from firebase_admin import firestore
@@ -145,6 +146,28 @@ class TrackingHistoryRepository(
     collection_name = "tracking_history"
     model_class = TrackingHistory
     timestamp_fields = ("recorded_at",)
+
+    def query_history_for_pet(
+        self,
+        owner_id: str,
+        pet_id: str,
+        limit: int,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> list[TrackingHistory]:
+        # Keep this query on pet_id only to avoid requiring Firestore composite
+        # indexes for owner_id/pet_id/recorded_at combinations. Ownership,
+        # date range, ordering, and limit are applied below.
+        query = self.collection.where(filter=firestore.FieldFilter("pet_id", "==", pet_id))
+        records = [self._from_snapshot(snapshot) for snapshot in query.stream()]
+        filtered = [record for record in records if record.owner_id == owner_id]
+        if start_time is not None:
+            filtered = [record for record in filtered if record.recorded_at >= start_time]
+        if end_time is not None:
+            filtered = [record for record in filtered if record.recorded_at <= end_time]
+
+        filtered.sort(key=lambda record: record.recorded_at)
+        return filtered[-limit:]
 
 
 class GeofenceRepository(FirestoreRepository[Geofence, GeofenceCreate, GeofenceUpdate]):

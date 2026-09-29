@@ -109,6 +109,25 @@ class NotificationService:
                     notification=messaging.Notification(title=alert.title, body=alert.message),
                     data=self._alert_data(alert),
                     token=token.token,
+                    android=messaging.AndroidConfig(
+                        priority="high",
+                        notification=messaging.AndroidNotification(
+                            channel_id="pet_tracker_alerts",
+                            sound="default",
+                            default_sound=True,
+                            default_vibrate_timings=True,
+                            priority="high",
+                        ),
+                    ),
+                    apns=messaging.ApnsConfig(
+                        headers={"apns-priority": "10"},
+                        payload=messaging.ApnsPayload(
+                            aps=messaging.Aps(
+                                sound="default",
+                                badge=1,
+                            )
+                        ),
+                    ),
                 )
             )
             self.token_repository.update_fields(token.id, {"last_used_at": firestore.SERVER_TIMESTAMP})

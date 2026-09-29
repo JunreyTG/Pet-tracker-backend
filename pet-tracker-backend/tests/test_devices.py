@@ -237,6 +237,29 @@ def test_device_secret_is_generated_and_hash_is_not_returned(fake_device_api_ser
     assert "device_secret_hash" not in body
 
 
+def test_authenticated_user_can_create_device_provisioning(fake_device_api_service: FakeDeviceApiService) -> None:
+    response = client.post(
+        "/api/v1/devices/setup",
+        json={"device_id": "PET-ESP32-010", "backend_url": "http://192.168.1.10:8000"},
+    )
+    body = response.json()
+
+    assert response.status_code == 201
+    assert body["device_id"] == "PET-ESP32-010"
+    assert body["device_secret"] == "raw-secret"
+    assert body["backend_url"] == "http://192.168.1.10:8000"
+    assert body["telemetry_path"] == "/api/v1/device/telemetry"
+    assert body["telemetry_url"] == "http://192.168.1.10:8000/api/v1/device/telemetry"
+    assert body["setup_hotspot_ssid"] == "PET_TRACKER_SETUP_PET-ESP32-010"
+    assert "device_secret_hash" not in body
+
+
+def test_duplicate_device_provisioning_returns_409(fake_device_api_service: FakeDeviceApiService) -> None:
+    response = client.post("/api/v1/devices/setup", json={"device_id": "duplicate-device"})
+
+    assert response.status_code == 409
+
+
 def test_duplicate_device_registration_returns_409(fake_device_api_service: FakeDeviceApiService) -> None:
     response = client.post("/api/v1/devices", json={"device_id": "duplicate-device"})
 
