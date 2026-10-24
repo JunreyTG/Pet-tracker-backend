@@ -12,7 +12,9 @@ cd pet-tracker-backend
 uvicorn app.main:app --reload
 ```
 
-Default API URL: `http://127.0.0.1:8000/api/v1`.
+Default backend URL: `https://pet-tracker-backend-gamma.vercel.app`. The app adds
+`/api/v1` to this URL for API requests. Set `PET_TRACKER_API_URL` to the backend
+origin (without `/api/v1`) only when using a different deployment or a local server.
 
 ## Run The App
 
