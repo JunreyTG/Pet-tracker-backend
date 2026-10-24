@@ -18,7 +18,7 @@ class DevicesScreen extends StatelessWidget {
         actions: [
           IconButton.filledTonal(
             icon: const Icon(Icons.wifi_tethering),
-            tooltip: 'Setup Tracker WiFi',
+            tooltip: 'Set up a tracker',
             onPressed: () => Get.toNamed(Routes.deviceWifiSetup),
           ),
           IconButton.filled(
@@ -36,7 +36,7 @@ class DevicesScreen extends StatelessWidget {
             message: 'Register an ESP32 tracker to assign it to a pet.',
             action: FilledButton(
               onPressed: () => Get.toNamed(Routes.deviceWifiSetup),
-              child: const Text('Setup Tracker WiFi'),
+              child: const Text('Set Up a Tracker'),
             ),
           );
         }
@@ -63,10 +63,19 @@ class DevicesScreen extends StatelessWidget {
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: Text(
-                            d.deviceId,
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(fontWeight: FontWeight.w900),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                data.deviceName(d.deviceId),
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(fontWeight: FontWeight.w900),
+                              ),
+                              Text(
+                                d.deviceId,
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
                           ),
                         ),
                         const Icon(Icons.chevron_right),

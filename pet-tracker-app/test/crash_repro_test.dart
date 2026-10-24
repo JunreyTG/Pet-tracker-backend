@@ -234,6 +234,48 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+    'browser setup gives a truthful guide and supports back navigation',
+    (tester) async {
+      await _pumpScreen(
+        tester,
+        const DeviceWifiSetupScreen(browserOverride: true),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Tracker code'),
+        'ESP32_123',
+      );
+      await tester.scrollUntilVisible(
+        find.text('Find My Tracker'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('Find My Tracker'));
+      await tester.pumpAndSettle();
+      expect(find.text('Step 2 of 4'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Continue'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      expect(find.text('Step 3 of 4'), findsOneWidget);
+      expect(find.text('Finish setup in the Android app'), findsOneWidget);
+      expect(find.text('Home WiFi network name'), findsNothing);
+      await tester.scrollUntilVisible(
+        find.text('Back'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('Back'));
+      await tester.pumpAndSettle();
+      expect(find.text('Step 2 of 4'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('tracking screen builds', (tester) async {
     await _pumpScreen(tester, const TrackingScreen());
     await tester.pump(const Duration(milliseconds: 500));
@@ -254,7 +296,7 @@ void main() {
     await _pumpScreen(tester, const TrackingScreen());
     await tester.pump(const Duration(milliseconds: 500));
     expect(tester.takeException(), isNull);
-    expect(find.text('Set map focus first'), findsOneWidget);
+    expect(find.text('Setup Focus Map & Start Tracking'), findsOneWidget);
     if (Get.isRegistered<TrackingController>()) {
       await Get.delete<TrackingController>(force: true);
     }

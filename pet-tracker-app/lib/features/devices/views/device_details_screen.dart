@@ -48,14 +48,14 @@ class DeviceDetailsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 14),
                   Text(
-                    'GPS Tracker Hardware',
+                    data.deviceName(d.deviceId),
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   Text(
                     d.deviceId,
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w900,
-                        ),
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -87,7 +87,9 @@ class DeviceDetailsScreen extends StatelessWidget {
                 children: [
                   Text('Last seen: ${d.lastSeen?.toString() ?? 'Never'}'),
                   const SizedBox(height: 4),
-                  Text('Last location update: ${d.lastLocationUpdate?.toString() ?? 'None'}'),
+                  Text(
+                    'Last location update: ${d.lastLocationUpdate?.toString() ?? 'None'}',
+                  ),
                   const SizedBox(height: 4),
                   Text('Coordinates: ${_coordinates(d.currentLocation)}'),
                 ],
@@ -138,7 +140,10 @@ class DeviceDetailsScreen extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
                                 decoration: BoxDecoration(
                                   color: AppTheme.green.withValues(alpha: .12),
                                   borderRadius: BorderRadius.circular(6),
@@ -156,7 +161,8 @@ class DeviceDetailsScreen extends StatelessWidget {
                               const SizedBox(height: 4),
                               Text(
                                 pet.name,
-                                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(fontWeight: FontWeight.w900),
                               ),
                               Text(
                                 '${pet.species}${pet.breed != null && pet.breed!.isNotEmpty ? " • ${pet.breed}" : ""}',
@@ -172,7 +178,12 @@ class DeviceDetailsScreen extends StatelessWidget {
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () => _assign(context, data, d.deviceId, currentPetId: pet.id),
+                            onPressed: () => _assign(
+                              context,
+                              data,
+                              d.deviceId,
+                              currentPetId: pet.id,
+                            ),
                             icon: const Icon(Icons.sync_alt, size: 18),
                             label: const Text('Change Pet'),
                           ),
@@ -199,7 +210,9 @@ class DeviceDetailsScreen extends StatelessWidget {
                   color: Theme.of(context).colorScheme.surface,
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(
-                    color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                    color: isDark
+                        ? const Color(0xFF334155)
+                        : const Color(0xFFE2E8F0),
                     width: 1.5,
                   ),
                   boxShadow: [
@@ -221,7 +234,11 @@ class DeviceDetailsScreen extends StatelessWidget {
                             color: AppTheme.orange.withValues(alpha: .15),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.pets, color: AppTheme.orange, size: 26),
+                          child: const Icon(
+                            Icons.pets,
+                            color: AppTheme.orange,
+                            size: 26,
+                          ),
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -230,9 +247,8 @@ class DeviceDetailsScreen extends StatelessWidget {
                             children: [
                               Text(
                                 'No Pet Assigned',
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                      fontWeight: FontWeight.w900,
-                                    ),
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w900),
                               ),
                               const SizedBox(height: 2),
                               Text(
@@ -252,12 +268,17 @@ class DeviceDetailsScreen extends StatelessWidget {
                         style: FilledButton.styleFrom(
                           backgroundColor: AppTheme.green,
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
                         ),
                         icon: const Icon(Icons.add_link),
                         label: const Text(
                           'Assign Tracker to Pet',
-                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
                         ),
                       ),
                     ),
@@ -269,23 +290,29 @@ class DeviceDetailsScreen extends StatelessWidget {
 
             // Tracker Actions
             OutlinedButton.icon(
-              onPressed: () => Get.toNamed(Routes.deviceWifiSetup, arguments: d.deviceId),
+              onPressed: () =>
+                  Get.toNamed(Routes.deviceWifiSetup, arguments: d.deviceId),
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
               ),
               icon: const Icon(Icons.wifi_tethering),
-              label: const Text('Setup Tracker WiFi'),
+              label: const Text('Set Up Tracker WiFi'),
             ),
 
             const SizedBox(height: 10),
 
             FilledButton.icon(
-              onPressed: () => Get.toNamed(Routes.tracking, arguments: d.deviceId),
+              onPressed: () =>
+                  Get.toNamed(Routes.tracking, arguments: d.deviceId),
               style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.ink,
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
               ),
               icon: const Icon(Icons.map),
               label: const Text('Track Location'),
@@ -301,13 +328,20 @@ class DeviceDetailsScreen extends StatelessWidget {
     return '${location.latitude.toStringAsFixed(6)}, ${location.longitude.toStringAsFixed(6)}';
   }
 
-  void _assign(BuildContext context, AppDataController data, String deviceId, {String? currentPetId}) {
+  void _assign(
+    BuildContext context,
+    AppDataController data,
+    String deviceId, {
+    String? currentPetId,
+  }) {
     final pets = data.pets;
     if (pets.isEmpty) {
       Get.dialog(
         AlertDialog(
           title: const Text('No Pets Found'),
-          content: const Text('Please create a pet profile first before assigning this tracker.'),
+          content: const Text(
+            'Please create a pet profile first before assigning this tracker.',
+          ),
           actions: [
             TextButton(onPressed: Get.back, child: const Text('Cancel')),
             FilledButton(
@@ -340,12 +374,20 @@ class DeviceDetailsScreen extends StatelessWidget {
                   final isSelected = p.id == selectedPetId;
                   return ListTile(
                     selected: isSelected,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 4,
+                    ),
                     leading: PetAvatar(photoUrl: p.photoUrl, size: 40),
-                    title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    title: Text(
+                      p.name,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
                     subtitle: Text(p.species),
                     trailing: Icon(
-                      isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+                      isSelected
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
                       color: isSelected ? AppTheme.green : Colors.grey,
                     ),
                     onTap: () => setState(() => selectedPetId = p.id),
@@ -423,26 +465,26 @@ class _DetailChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: Theme.of(context).brightness == Brightness.dark
-                ? const Color(0xFF334155)
-                : const Color(0xFFE2E8F0),
-          ),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surface,
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xFF334155)
+            : const Color(0xFFE2E8F0),
+      ),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: TextStyle(color: color, fontWeight: FontWeight.w800),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 16, color: color),
-            const SizedBox(width: 6),
-            Text(
-              text,
-              style: TextStyle(color: color, fontWeight: FontWeight.w800),
-            ),
-          ],
-        ),
-      );
+      ],
+    ),
+  );
 }

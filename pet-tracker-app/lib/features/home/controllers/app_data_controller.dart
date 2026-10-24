@@ -22,6 +22,7 @@ class AppDataController extends GetxController {
 
   final pets = <PetModel>[].obs;
   final devices = <DeviceModel>[].obs;
+  final deviceNames = <String, String>{}.obs;
   final geofences = <GeofenceModel>[].obs;
   final alerts = <AlertModel>[].obs;
   final selectedPet = Rxn<PetModel>();
@@ -38,6 +39,40 @@ class AppDataController extends GetxController {
   static const _fallbackMapFocusPrefsKey = 'map_focus_current_device';
 
   int get unreadCount => alerts.where((a) => !a.read).length;
+  String deviceName(String id) {
+    final saved = deviceNames[id];
+    if (saved != null && saved.isNotEmpty) return saved;
+    final device = devices.firstWhereOrNull((item) => item.deviceId == id);
+    final pet = pets.firstWhereOrNull((item) => item.id == device?.petId);
+    return pet == null ? 'Pet Tracker' : "${pet.name}'s Tracker";
+  }
+
+  Future<void> setDeviceName(String id, String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    final userId = Get.find<AuthController>().backendUser.value?.uid;
+    if (userId == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('tracker_name_${userId}_$id', trimmed);
+    deviceNames[id] = trimmed;
+  }
+
+  Future<void> _loadDeviceNames(List<DeviceModel> loaded) async {
+    final userId = Get.find<AuthController>().backendUser.value?.uid;
+    if (userId == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final names = <String, String>{};
+      for (final device in loaded) {
+        final name = prefs.getString(
+          'tracker_name_${userId}_${device.deviceId}',
+        );
+        if (name != null && name.isNotEmpty) names[device.deviceId] = name;
+      }
+      deviceNames.assignAll(names);
+    } catch (_) {}
+  }
+
   bool get hasMapFocus =>
       mapFocusLocation.value != null &&
       mapFocusCountry.value != null &&
@@ -88,6 +123,7 @@ class AppDataController extends GetxController {
       ]);
       pets.assignAll(results[0] as List<PetModel>);
       devices.assignAll(results[1] as List<DeviceModel>);
+      await _loadDeviceNames(results[1] as List<DeviceModel>);
       geofences.assignAll(results[2] as List<GeofenceModel>);
       alerts.assignAll(results[3] as List<AlertModel>);
       if (pets.isNotEmpty &&
@@ -197,6 +233,7 @@ class AppDataController extends GetxController {
   void _clear() {
     pets.clear();
     devices.clear();
+    deviceNames.clear();
     geofences.clear();
     alerts.clear();
     selectedPet.value = null;

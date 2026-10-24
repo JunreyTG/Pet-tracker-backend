@@ -91,7 +91,7 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('ESP32_002'), findsOneWidget);
-    expect(find.text('Assigned to Tong'), findsOneWidget);
+    expect(find.text('Tong'), findsOneWidget);
   });
 
   testWidgets('missing optional fields render', (tester) async {
@@ -108,7 +108,7 @@ void main() {
     await _openDetails(tester, 'ESP32_003');
 
     expect(tester.takeException(), isNull);
-    expect(find.text('No assigned pet'), findsOneWidget);
+    expect(find.text('No Pet Assigned'), findsOneWidget);
     expect(find.textContaining('Coordinates: None'), findsOneWidget);
   });
 
