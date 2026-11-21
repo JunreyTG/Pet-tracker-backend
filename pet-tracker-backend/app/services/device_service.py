@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass
 
 from firebase_admin import firestore
-from google.api_core.exceptions import GoogleAPIError
+from google.api_core.exceptions import AlreadyExists, GoogleAPIError
 
 from app.models.entities import Device, DeviceCreate, DeviceStatus
 from app.schemas.devices import DeviceRegisterRequest
@@ -10,6 +10,7 @@ from app.services.device_credentials import generate_device_secret, hash_device_
 from app.services.firestore_repositories import DeviceRepository, PetRepository
 
 logger = logging.getLogger(__name__)
+UNCLAIMED_TRACKER_OWNER = "unclaimed-tracker-inventory"
 
 
 class DeviceNotFoundError(RuntimeError):
@@ -55,13 +56,14 @@ class DeviceService:
                     device_id=data.device_id,
                     name=data.name,
                     owner_id=owner_id,
+                    preconfigured=owner_id == UNCLAIMED_TRACKER_OWNER,
                     pet_id=None,
                     status=DeviceStatus.UNREGISTERED,
                     device_secret_hash=device_secret_hash,
                 )
             )
-        except DeviceConflictError:
-            raise
+        except AlreadyExists as exc:
+            raise DeviceConflictError("Device is already registered.") from exc
         except GoogleAPIError as exc:
             logger.info("Firestore device registration failed: %s", exc.__class__.__name__)
             raise DeviceServiceError("Device could not be registered.") from exc
@@ -88,39 +90,48 @@ class DeviceService:
         return device
 
     def assign_device_to_pet(self, owner_id: str, device_id: str, pet_id: str) -> Device:
-        device = self.get_device(owner_id, device_id)
-        if device.pet_id is not None and device.pet_id != pet_id:
-            raise DeviceConflictError("Device is already assigned to another pet.")
+        return self._assign(owner_id, device_id, pet_id, claim=False)
+
+    def claim_device(self, owner_id: str, device_id: str, pet_id: str) -> Device:
+        return self._assign(owner_id, device_id, pet_id, claim=True)
+
+    def _assign(self, owner_id: str, device_id: str, pet_id: str, *, claim: bool) -> Device:
+        @firestore.transactional
+        def assign(transaction):
+            device = self.device_repository.get(device_id, transaction=transaction)
+            if device is None:
+                raise DeviceNotFoundError("Device was not found.")
+            claimable = (
+                claim and device.owner_id == UNCLAIMED_TRACKER_OWNER
+                and device.preconfigured and device.status == DeviceStatus.UNREGISTERED
+                and bool(device.device_secret_hash)
+            )
+            if device.owner_id != owner_id and not claimable:
+                raise DeviceNotFoundError("Device was not found.")
+            if device.pet_id not in (None, pet_id):
+                raise DeviceConflictError("Device is already assigned to another pet.")
+
+            pet = self.pet_repository.get(pet_id, transaction=transaction)
+            if pet is None or pet.owner_id != owner_id:
+                raise DeviceNotFoundError("Pet was not found.")
+            if pet.device_id not in (None, device_id):
+                raise DeviceConflictError("Pet already has a device assigned.")
+            if device.owner_id == owner_id and device.pet_id == pet_id and pet.device_id == device_id:
+                return
+
+            transaction.update(self.device_repository.collection.document(device_id), {
+                "owner_id": owner_id, "pet_id": pet_id, "updated_at": firestore.SERVER_TIMESTAMP,
+            })
+            transaction.update(self.pet_repository.collection.document(pet_id), {
+                "device_id": device_id, "updated_at": firestore.SERVER_TIMESTAMP,
+            })
 
         try:
-            pet = self.pet_repository.get(pet_id)
-        except GoogleAPIError as exc:
-            logger.info("Firestore pet lookup for device assignment failed: %s", exc.__class__.__name__)
-            raise DeviceServiceError("Device assignment could not be completed.") from exc
-
-        if pet is None or pet.owner_id != owner_id:
-            raise DeviceNotFoundError("Pet was not found.")
-
-        if pet.device_id is not None and pet.device_id != device_id:
-            raise DeviceConflictError("Pet already has a device assigned.")
-
-        try:
-            batch = self.device_repository.client.batch()
-            device_ref = self.device_repository.collection.document(device_id)
-            pet_ref = self.pet_repository.collection.document(pet_id)
-            batch.update(device_ref, {"pet_id": pet_id, "updated_at": firestore.SERVER_TIMESTAMP})
-            batch.update(pet_ref, {"device_id": device_id, "updated_at": firestore.SERVER_TIMESTAMP})
-            batch.commit()
-            updated_device = self.device_repository.get(device_id)
+            assign(self.device_repository.client.transaction())
         except GoogleAPIError as exc:
             logger.info("Firestore device assignment failed: %s", exc.__class__.__name__)
             raise DeviceServiceError("Device assignment could not be completed.") from exc
-
-        if updated_device is None or updated_device.owner_id != owner_id:
-            raise DeviceNotFoundError("Device was not found.")
-
-
-        return updated_device
+        return self.get_device(owner_id, device_id)
 
     def unassign_device(self, owner_id: str, device_id: str) -> Device:
         device = self.get_device(owner_id, device_id)

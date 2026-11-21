@@ -83,6 +83,7 @@ class FakeApiClient extends ApiClient {
   bool emailVerified = false;
   bool emailAlerts = false;
   Map? trackerSetup;
+  Map? trackerClaim;
 
   Map<String, dynamic> _emailUserJson() => {
     'uid': 'owner',
@@ -100,6 +101,16 @@ class FakeApiClient extends ApiClient {
   }) async {
     if (path == '/alerts') alertsReads++;
     if (path == '/devices/ESP32_002') return _deviceJson();
+    if (path == '/devices/PT-3C9814AFD750' && trackerClaim != null) {
+      return {
+        'device_id': trackerClaim!['device_id'],
+        'pet_id': trackerClaim!['pet_id'],
+        'preconfigured': true,
+        'status': 'online',
+        'last_seen': DateTime.now().toUtc().toIso8601String(),
+        'gps_fix': false,
+      };
+    }
     if (path == '/pets' && trackerSetup != null) {
       return [
         {'id': 'p1', 'name': 'Milo', 'species': 'Dog'},
@@ -137,6 +148,18 @@ class FakeApiClient extends ApiClient {
 
   @override
   Future<dynamic> post(String path, {Object? body}) async {
+    if (path == '/pets') {
+      return {'id': 'new-pet', ...body as Map<String, dynamic>};
+    }
+    if (path == '/devices/claim') {
+      trackerClaim = body as Map;
+      return {
+        'device_id': trackerClaim!['device_id'],
+        'pet_id': trackerClaim!['pet_id'],
+        'preconfigured': true,
+        'status': 'unregistered',
+      };
+    }
     if (path == '/devices/setup') {
       trackerSetup = body as Map;
       return {
@@ -291,6 +314,47 @@ void main() {
   testWidgets('pet form screen builds', (tester) async {
     await _pumpScreen(tester, const PetFormScreen());
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('new pet can link a preconfigured tracker using only its ID', (
+    tester,
+  ) async {
+    final api = Get.find<ApiClient>() as FakeApiClient;
+    await tester.pumpWidget(
+      GetMaterialApp(home: const PetFormScreen(), getPages: AppPages.pages),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Pet Name'), 'Milo');
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Species (e.g. Dog, Cat)'),
+      'Dog',
+    );
+    await tester.scrollUntilVisible(
+      find.text('Create Pet'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Create Pet'));
+    await tester.pumpAndSettle();
+    expect(find.text('Link a tracker to Milo'), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Device ID'),
+      'pt-3c9814afd750',
+    );
+    await tester.tap(find.text('Connect Device'));
+    await tester.pumpAndSettle();
+    expect(api.trackerClaim, {
+      'device_id': 'PT-3C9814AFD750',
+      'pet_id': 'new-pet',
+    });
+    expect(
+      find.textContaining('Waiting for the tracker to report'),
+      findsOneWidget,
+    );
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.text('Online · waiting for GPS'), findsOneWidget);
   });
 
   testWidgets('devices screen builds', (tester) async {

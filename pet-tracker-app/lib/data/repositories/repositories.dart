@@ -176,6 +176,15 @@ class PetRepository {
 class DeviceRepository {
   DeviceRepository(this._api);
   final ApiClient _api;
+  Future<DeviceModel> claim(String deviceId, String petId) async =>
+      DeviceModel.fromJson(
+        Map<String, dynamic>.from(
+          await _api.post(
+            '/devices/claim',
+            body: {'device_id': deviceId, 'pet_id': petId},
+          ),
+        ),
+      );
   Future<List<DeviceModel>> list() async =>
       parseModelList(await _api.get('/devices'), DeviceModel.fromJson);
   Future<DeviceModel> get(String id) async => DeviceModel.fromJson(
@@ -194,11 +203,7 @@ class DeviceRepository {
     Map<String, dynamic>.from(
       await _api.post(
         '/devices/setup',
-        body: {
-          'device_id': id,
-          'backend_url': backendUrl,
-          'name': ?name,
-        },
+        body: {'device_id': id, 'backend_url': backendUrl, 'name': ?name},
       ),
     ),
   );

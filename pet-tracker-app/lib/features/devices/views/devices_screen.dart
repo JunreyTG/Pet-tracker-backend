@@ -19,9 +19,16 @@ class DevicesScreen extends StatelessWidget {
           IconButton.filled(
             icon: const Icon(Icons.add),
             tooltip: 'Add Device',
-            onPressed: () => Get.toNamed(Routes.deviceWifiSetup),
+            onPressed: () => Get.toNamed(Routes.deviceLink),
           ),
-          const SizedBox(width: 12),
+          PopupMenuButton<void>(
+            itemBuilder: (_) => [
+              PopupMenuItem<void>(
+                onTap: () => Get.toNamed(Routes.deviceWifiSetup),
+                child: const Text('Tracker hotspot setup'),
+              ),
+            ],
+          ),
         ],
       ),
       body: Obx(() {
@@ -32,7 +39,7 @@ class DevicesScreen extends StatelessWidget {
             message:
                 'Add your tracker to connect it and start tracking your pet.',
             action: FilledButton(
-              onPressed: () => Get.toNamed(Routes.deviceWifiSetup),
+              onPressed: () => Get.toNamed(Routes.deviceLink),
               child: const Text('Add Device'),
             ),
           );

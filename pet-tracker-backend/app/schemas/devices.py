@@ -4,6 +4,8 @@ from pydantic import Field, field_validator
 
 from app.models.entities import DeviceStatus, FirestoreModel, Location
 
+PT_DEVICE_ID_PATTERN = r"^PT-[0-9A-F]{12}$"
+
 
 class DeviceRegisterRequest(FirestoreModel):
     device_id: str = Field(min_length=1, max_length=128)
@@ -23,11 +25,22 @@ class DeviceAssignRequest(FirestoreModel):
     pet_id: str = Field(min_length=1)
 
 
+class DeviceClaimRequest(FirestoreModel):
+    device_id: str = Field(pattern=PT_DEVICE_ID_PATTERN)
+    pet_id: str = Field(min_length=1, max_length=128, pattern=r"^[^/]+$")
+
+    @field_validator("device_id", mode="before")
+    @classmethod
+    def normalize_id(cls, value: str) -> str:
+        return value.strip().upper() if isinstance(value, str) else value
+
+
 class DeviceResponse(FirestoreModel):
     id: str
     device_id: str
     owner_id: str
     name: str | None = None
+    preconfigured: bool = False
     pet_id: str | None = None
     status: DeviceStatus
     battery_level: int | None = Field(default=None, ge=0, le=100)

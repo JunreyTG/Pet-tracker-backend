@@ -8,6 +8,7 @@ from app.models.auth import AuthenticatedUser
 from app.models.entities import Device
 from app.schemas.devices import (
     DeviceAssignRequest,
+    DeviceClaimRequest,
     DeviceProvisioningRequest,
     DeviceProvisioningResponse,
     DeviceRegisterRequest,
@@ -112,6 +113,22 @@ def create_device_provisioning(
         return _provisioning_payload(registration, backend_url)
     except DeviceConflictError as exc:
         raise _conflict("Device is already registered. Use the saved device secret or register a new tracker ID.") from exc
+    except DeviceServiceError as exc:
+        raise _unavailable() from exc
+
+
+@router.post("/claim", response_model=DeviceResponse)
+def claim_device(
+    data: DeviceClaimRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    device_service: DeviceService = Depends(get_device_service),
+) -> dict[str, Any]:
+    try:
+        return _device_payload(device_service.claim_device(current_user.uid, data.device_id, data.pet_id))
+    except DeviceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Tracker or pet not available for this account.") from exc
+    except DeviceConflictError as exc:
+        raise _conflict(str(exc)) from exc
     except DeviceServiceError as exc:
         raise _unavailable() from exc
 

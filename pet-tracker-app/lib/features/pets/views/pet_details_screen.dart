@@ -48,13 +48,18 @@ class PetDetailsScreen extends StatelessWidget {
                               : 'Tracker ${device.deviceId}',
                           style: const TextStyle(fontWeight: FontWeight.w900),
                         ),
-                        Text(device?.status ?? 'Assign a tracker from Collars'),
+                        Text(device?.status ?? 'Link a tracker by its ID'),
                       ],
                     ),
                   ),
                   IconButton(
                     icon: const Icon(Icons.chevron_right),
-                    onPressed: () => Get.toNamed(Routes.devices),
+                    onPressed: () => pet.deviceId == null
+                        ? Get.toNamed(Routes.deviceLink, arguments: pet)
+                        : Get.toNamed(
+                            Routes.deviceDetails,
+                            arguments: pet.deviceId,
+                          ),
                   ),
                 ],
               ),
@@ -162,10 +167,7 @@ class _PetHeader extends StatelessWidget {
                 ),
               ],
             ),
-            child: PetAvatar(
-              photoUrl: pet.photoUrl,
-              size: 88,
-            ),
+            child: PetAvatar(photoUrl: pet.photoUrl, size: 88),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -181,7 +183,10 @@ class _PetHeader extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.green.withValues(alpha: .14),
                     borderRadius: BorderRadius.circular(999),

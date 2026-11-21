@@ -300,18 +300,19 @@ class DeviceDetailsScreen extends StatelessWidget {
             const SizedBox(height: 14),
 
             // Tracker Actions
-            OutlinedButton.icon(
-              onPressed: () =>
-                  Get.toNamed(Routes.deviceWifiSetup, arguments: d.deviceId),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+            if (!d.preconfigured)
+              OutlinedButton.icon(
+                onPressed: () =>
+                    Get.toNamed(Routes.deviceWifiSetup, arguments: d.deviceId),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
                 ),
+                icon: const Icon(Icons.wifi_tethering),
+                label: const Text('Set Up Tracker WiFi'),
               ),
-              icon: const Icon(Icons.wifi_tethering),
-              label: const Text('Set Up Tracker WiFi'),
-            ),
 
             const SizedBox(height: 10),
 

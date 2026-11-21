@@ -58,8 +58,8 @@ class FirestoreRepository(Generic[ModelT, CreateT, UpdateT]):
         snapshot = document.get()
         return self._from_snapshot(snapshot)
 
-    def get(self, document_id: str) -> ModelT | None:
-        snapshot = self.collection.document(document_id).get(retry=None, timeout=READ_TIMEOUT_SECONDS)
+    def get(self, document_id: str, *, transaction=None) -> ModelT | None:
+        snapshot = self.collection.document(document_id).get(transaction=transaction, retry=None, timeout=READ_TIMEOUT_SECONDS)
         if not snapshot.exists:
             return None
         return self._from_snapshot(snapshot)
@@ -152,7 +152,11 @@ class DeviceRepository(FirestoreRepository[Device, DeviceCreate, DeviceUpdate]):
         return data
 
     def create(self, data: DeviceCreate) -> Device:  # type: ignore[override]
-        return super().create(data, document_id=data.device_id)
+        document = self.collection.document(data.device_id)
+        payload = self._dump(data)
+        payload.update(created_at=firestore.SERVER_TIMESTAMP, updated_at=firestore.SERVER_TIMESTAMP)
+        document.create(payload)
+        return self._from_snapshot(document.get(retry=None, timeout=READ_TIMEOUT_SECONDS))
 
     def query_by_status(self, status: str) -> list[Device]:
         return self._where_equals("status", status)

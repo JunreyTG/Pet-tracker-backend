@@ -166,6 +166,14 @@ Valid device telemetry triggers geofence checks for all enabled geofences assign
 
 Alerts and FCM delivery are handled by later alert/notification services; geofence evaluation itself only returns transition results.
 
+## Link a Preconfigured Tracker by ID
+
+For trackers built with their own Wi-Fi setup, the app links the tracker through the cloud. The phone can use mobile data or a different Wi-Fi network.
+
+1. As the operator, run `python -m app.enroll_tracker PT-3C9814AFD750` from `pet-tracker-backend/` with the target project's Firebase credentials. Substitute the ID you chose and embedded in the device. Use unique, randomly chosen IDs and share each ID only with its intended owner before linking.
+2. Configure the tracker with that exact ID, the printed **device secret**, and the backend HTTPS URL. The tracker should send authenticated `POST /api/v1/device/heartbeat` or `POST /api/v1/device/telemetry` reports and retry if it receives `409` while awaiting a pet assignment. Wi-Fi connectivity alone does not send these reports. The secret is stored on the hardware and never returned to the app's ID-linking flow.
+3. In the app, create a pet, enter the tracker ID and tap **Connect Device**. The app calls `POST /api/v1/devices/claim` with the ID and the pet's ID. It shows the tracker as linked once the backend assigns it, and online after a recent report arrives.
+
 ## Email Verification and Alerts
 
 Registration and sign-in do not require email verification. Users can optionally verify their address in **Email notifications** to enable email alerts. `POST /api/v1/auth/email/send` requests a 16-character verification code through Brevo.

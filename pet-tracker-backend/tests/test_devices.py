@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from firebase_admin import firestore
 
 from app.main import app
 from app.models.auth import AuthenticatedUser
@@ -17,6 +18,7 @@ from app.services.device_service import (
     DeviceNotFoundError,
     DeviceRegistration,
     DeviceService,
+    UNCLAIMED_TRACKER_OWNER,
     get_device_service,
 )
 
@@ -131,6 +133,9 @@ class FakeClient:
     def batch(self) -> FakeBatch:
         return FakeBatch()
 
+    def transaction(self) -> FakeBatch:
+        return FakeBatch()
+
 
 class FakeDeviceRepository:
     def __init__(self) -> None:
@@ -150,14 +155,14 @@ class FakeDeviceRepository:
             owner_id=data.owner_id,
             pet_id=data.pet_id,
             device_secret_hash=data.device_secret_hash,
-        )
+        ).model_copy(update={"name": data.name, "preconfigured": data.preconfigured})
         self.devices[device.device_id] = device
         return device
 
     def query_by_owner(self, owner_id: str) -> list[Device]:
         return [device for device in self.devices.values() if device.owner_id == owner_id]
 
-    def get(self, device_id: str) -> Device | None:
+    def get(self, device_id: str, *, transaction=None) -> Device | None:
         return self.devices.get(device_id)
 
     def apply_update(self, device_id: str, payload: dict[str, Any]) -> None:
@@ -175,7 +180,7 @@ class FakePetRepository:
             "pet-3": make_pet(pet_id="pet-3", owner_id="owner-2"),
         }
 
-    def get(self, pet_id: str) -> Pet | None:
+    def get(self, pet_id: str, *, transaction=None) -> Pet | None:
         return self.pets.get(pet_id)
 
     def apply_update(self, pet_id: str, payload: dict[str, Any]) -> None:
@@ -185,7 +190,15 @@ class FakePetRepository:
 
 
 @pytest.fixture(autouse=True)
-def clear_dependency_overrides() -> None:
+def clear_dependency_overrides(monkeypatch) -> None:
+    def transactional(fn):
+        def execute(transaction):
+            result = fn(transaction)
+            transaction.commit()
+            return result
+        return execute
+
+    monkeypatch.setattr(firestore, "transactional", transactional)
     app.dependency_overrides.clear()
     yield
     app.dependency_overrides.clear()
@@ -201,6 +214,33 @@ def fake_device_api_service() -> FakeDeviceApiService:
     )
     app.dependency_overrides[get_device_service] = lambda: service
     return service
+
+
+def test_cloud_claim_requires_existing_inventory_and_keeps_device_credentials_private(fake_device_api_service) -> None:
+    devices = FakeDeviceRepository()
+    pets = FakePetRepository()
+    service = DeviceService(device_repository=devices, pet_repository=pets)
+    app.dependency_overrides[get_device_service] = lambda: service
+    tracker_id = "PT-3C9814AFD750"
+    request = {"device_id": tracker_id.lower(), "pet_id": "pet-1"}
+
+    assert client.post("/api/v1/devices/claim", json=request).status_code == 404
+    enrolled = service.register_device(UNCLAIMED_TRACKER_OWNER, DeviceRegisterRequest(device_id=tracker_id))
+    assert client.post("/api/v1/devices/claim", json={**request, "pet_id": "pet-3"}).status_code == 404
+    assert devices.get(tracker_id).owner_id == UNCLAIMED_TRACKER_OWNER
+    response = client.post("/api/v1/devices/claim", json=request)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["device_id"] == tracker_id and body["pet_id"] == "pet-1"
+    assert body["preconfigured"] and body["status"] == "unregistered"
+    assert "device_secret" not in body and "device_secret_hash" not in body
+    assert pets.get("pet-1").device_id == tracker_id
+    assert client.post("/api/v1/devices/claim", json=request).status_code == 200
+    with pytest.raises(DeviceNotFoundError):
+        service.claim_device("owner-2", tracker_id, "pet-3")
+    assert DeviceAuthenticationService(device_repository=devices).verify_device_credentials(
+        tracker_id, enrolled.device_secret
+    ).pet_id == "pet-1"
 
 
 def test_unauthenticated_registration_returns_401() -> None:

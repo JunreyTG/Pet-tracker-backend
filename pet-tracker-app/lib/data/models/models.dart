@@ -172,6 +172,7 @@ class DeviceModel {
     required this.id,
     required this.deviceId,
     this.name,
+    this.preconfigured = false,
     this.petId,
     required this.status,
     this.batteryLevel,
@@ -186,6 +187,7 @@ class DeviceModel {
   final String id;
   final String deviceId;
   final String? name;
+  final bool preconfigured;
   final String? petId;
   final String status;
   final int? batteryLevel;
@@ -201,6 +203,7 @@ class DeviceModel {
     id: json['id']?.toString() ?? json['device_id']?.toString() ?? '',
     deviceId: json['device_id']?.toString() ?? '',
     name: json['name'] as String?,
+    preconfigured: json['preconfigured'] == true,
     petId: json['pet_id']?.toString(),
     status: json['status']?.toString() ?? 'unregistered',
     batteryLevel: parseIntOrNull(json['battery_level']),

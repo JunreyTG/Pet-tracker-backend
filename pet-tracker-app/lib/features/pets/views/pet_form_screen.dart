@@ -31,35 +31,43 @@ class _PetFormScreenState extends State<PetFormScreen> {
   static const List<Map<String, String>> _petPresets = [
     {
       'label': 'Golden Retriever',
-      'url': 'https://images.unsplash.com/photo-1552053831-71594a27632d?w=400&auto=format&fit=crop&q=80',
+      'url':
+          'https://images.unsplash.com/photo-1552053831-71594a27632d?w=400&auto=format&fit=crop&q=80',
     },
     {
       'label': 'Playful Puppy',
-      'url': 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?w=400&auto=format&fit=crop&q=80',
+      'url':
+          'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?w=400&auto=format&fit=crop&q=80',
     },
     {
       'label': 'Husky',
-      'url': 'https://images.unsplash.com/photo-1605568427561-40dd23c2acea?w=400&auto=format&fit=crop&q=80',
+      'url':
+          'https://images.unsplash.com/photo-1605568427561-40dd23c2acea?w=400&auto=format&fit=crop&q=80',
     },
     {
       'label': 'Bulldog',
-      'url': 'https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=400&auto=format&fit=crop&q=80',
+      'url':
+          'https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=400&auto=format&fit=crop&q=80',
     },
     {
       'label': 'Fluffy Cat',
-      'url': 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=400&auto=format&fit=crop&q=80',
+      'url':
+          'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=400&auto=format&fit=crop&q=80',
     },
     {
       'label': 'Orange Tabby',
-      'url': 'https://images.unsplash.com/photo-1574158622682-e40e69881006?w=400&auto=format&fit=crop&q=80',
+      'url':
+          'https://images.unsplash.com/photo-1574158622682-e40e69881006?w=400&auto=format&fit=crop&q=80',
     },
     {
       'label': 'Cute Rabbit',
-      'url': 'https://images.unsplash.com/photo-1585110396000-c9ffd4e4b308?w=400&auto=format&fit=crop&q=80',
+      'url':
+          'https://images.unsplash.com/photo-1585110396000-c9ffd4e4b308?w=400&auto=format&fit=crop&q=80',
     },
     {
       'label': 'Parrot / Bird',
-      'url': 'https://images.unsplash.com/photo-1552728089-57bdde30beb3?w=400&auto=format&fit=crop&q=80',
+      'url':
+          'https://images.unsplash.com/photo-1552728089-57bdde30beb3?w=400&auto=format&fit=crop&q=80',
     },
   ];
 
@@ -124,7 +132,9 @@ class _PetFormScreenState extends State<PetFormScreen> {
   }
 
   void _openPhotoPicker() {
-    final customUrlController = TextEditingController(text: photo.text.startsWith('data:') ? '' : photo.text);
+    final customUrlController = TextEditingController(
+      text: photo.text.startsWith('data:') ? '' : photo.text,
+    );
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -156,7 +166,9 @@ class _PetFormScreenState extends State<PetFormScreen> {
               const SizedBox(height: 16),
               Text(
                 'Choose Pet Photo',
-                style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                style: Theme.of(
+                  ctx,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
@@ -169,13 +181,24 @@ class _PetFormScreenState extends State<PetFormScreen> {
                       onPressed: () => _pickImage(ImageSource.gallery),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        side: const BorderSide(color: AppTheme.green, width: 1.5),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        side: const BorderSide(
+                          color: AppTheme.green,
+                          width: 1.5,
+                        ),
                       ),
-                      icon: const Icon(Icons.photo_library, color: AppTheme.green),
+                      icon: const Icon(
+                        Icons.photo_library,
+                        color: AppTheme.green,
+                      ),
                       label: const Text(
                         'Upload File / Gallery',
-                        style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.green),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.green,
+                        ),
                       ),
                     ),
                   ),
@@ -185,7 +208,9 @@ class _PetFormScreenState extends State<PetFormScreen> {
                       onPressed: () => _pickImage(ImageSource.camera),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
                       ),
                       icon: const Icon(Icons.camera_alt, color: AppTheme.ink),
                       label: const Text(
@@ -200,7 +225,9 @@ class _PetFormScreenState extends State<PetFormScreen> {
               const SizedBox(height: 20),
               Text(
                 'Or Choose Quick Avatar',
-                style: Theme.of(ctx).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                style: Theme.of(
+                  ctx,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 10),
               SizedBox(
@@ -227,19 +254,21 @@ class _PetFormScreenState extends State<PetFormScreen> {
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: isSelected ? AppTheme.green : Colors.transparent,
+                                color: isSelected
+                                    ? AppTheme.green
+                                    : Colors.transparent,
                                 width: 3,
                               ),
                             ),
-                            child: PetAvatar(
-                              photoUrl: preset['url'],
-                              size: 64,
-                            ),
+                            child: PetAvatar(photoUrl: preset['url'], size: 64),
                           ),
                           const SizedBox(height: 6),
                           Text(
                             preset['label']!,
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ],
                       ),
@@ -250,7 +279,9 @@ class _PetFormScreenState extends State<PetFormScreen> {
               const SizedBox(height: 16),
               Text(
                 'Or Image Web Link',
-                style: Theme.of(ctx).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                style: Theme.of(
+                  ctx,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -326,10 +357,7 @@ class _PetFormScreenState extends State<PetFormScreen> {
                                   ),
                                 ],
                               ),
-                              child: PetAvatar(
-                                photoUrl: photo.text,
-                                size: 96,
-                              ),
+                              child: PetAvatar(photoUrl: photo.text, size: 96),
                             ),
                             Container(
                               padding: const EdgeInsets.all(8),
@@ -394,7 +422,11 @@ class _PetFormScreenState extends State<PetFormScreen> {
                     const SizedBox(height: 20),
                     FilledButton(
                       onPressed: saving ? null : () => _save(data),
-                      child: Text(saving ? 'Saving...' : (editing == null ? 'Create Pet' : 'Save Changes')),
+                      child: Text(
+                        saving
+                            ? 'Saving...'
+                            : (editing == null ? 'Create Pet' : 'Save Changes'),
+                      ),
                     ),
                   ],
                 ),
@@ -416,13 +448,16 @@ class _PetFormScreenState extends State<PetFormScreen> {
       'photo_url': photo.text.trim().isEmpty ? null : photo.text.trim(),
     };
     try {
-      if (editing == null) {
-        await data.petsRepo.create(body);
-      } else {
-        await data.petsRepo.update(editing!.id, body);
-      }
+      final pet = editing == null
+          ? await data.petsRepo.create(body)
+          : await data.petsRepo.update(editing!.id, body);
       await data.refreshAll();
-      Get.offNamed(Routes.pets);
+      if (!mounted) return;
+      if (editing == null) {
+        Get.offNamed(Routes.deviceLink, arguments: pet);
+      } else {
+        Get.offNamed(Routes.pets);
+      }
     } catch (e) {
       Get.snackbar('Save failed', e.toString());
     } finally {
