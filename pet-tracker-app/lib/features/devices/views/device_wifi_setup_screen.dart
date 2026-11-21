@@ -30,8 +30,10 @@ class DeviceWifiSetupScreen extends StatefulWidget {
   State<DeviceWifiSetupScreen> createState() => _DeviceWifiSetupScreenState();
 }
 
-class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
+class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen>
+    with WidgetsBindingObserver {
   final data = Get.find<AppDataController>();
+  final name = TextEditingController();
   final code = TextEditingController();
   final wifiName = TextEditingController();
   final wifiPassword = TextEditingController();
@@ -48,7 +50,8 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
   static const maxChecks = 30;
   Timer? pollTimer;
   int pollCount = 0;
-  int step = 0;
+  int step = -1;
+  bool reconnecting = false;
   bool loadingPets = true, busy = false, checking = false;
   bool addressAnswered = false,
       uncertainDelivery = false,
@@ -60,7 +63,9 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
   String? error, detail, notice;
 
   bool get browser => widget.browserOverride ?? kIsWeb;
-  String get trackerId => code.text.trim().toUpperCase();
+  String get trackerId => TrackerLocalSetup.normalizeDeviceCode(code.text);
+  int get displayStep => step + (reconnecting ? 1 : 2);
+  int get totalSteps => reconnecting ? 4 : 5;
   String get expectedNetwork =>
       'PetTracker-${trackerId.substring(trackerId.length - 6)}';
   String get storageKey {
@@ -72,10 +77,26 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final argument = Get.arguments;
-    if (argument is String && argument.isNotEmpty) code.text = argument;
+    if (argument is String && argument.isNotEmpty) {
+      reconnecting = true;
+      code.text = argument;
+      name.text = data.deviceName(trackerId);
+      petId = data.devices
+          .firstWhereOrNull((d) => d.deviceId == trackerId)
+          ?.petId;
+      step = 0;
+    }
     restoreProgress();
     loadPets();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && step == 1 && !browser) {
+      checkConnection(quiet: true);
+    }
   }
 
   Future<void> loadPets() async {
@@ -103,17 +124,22 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
   Future<void> restoreProgress() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (!mounted) return;
+      if (!mounted || reconnecting || step != -1) return;
+      if (name.text.isEmpty) {
+        name.text = prefs.getString('${storageKey}_name') ?? '';
+      }
       if (code.text.isEmpty) {
         code.text = prefs.getString('${storageKey}_code') ?? '';
       }
-      setState(() => petId = prefs.getString('${storageKey}_pet'));
+      setState(() => petId ??= prefs.getString('${storageKey}_pet'));
     } catch (_) {}
   }
 
   Future<void> saveProgress() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      if (reconnecting) return;
+      await prefs.setString('${storageKey}_name', name.text.trim());
       await prefs.setString('${storageKey}_code', trackerId);
       if (petId != null) await prefs.setString('${storageKey}_pet', petId!);
     } catch (_) {}
@@ -122,6 +148,8 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
   Future<void> clearProgress() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      if (reconnecting) return;
+      await prefs.remove('${storageKey}_name');
       await prefs.remove('${storageKey}_code');
       await prefs.remove('${storageKey}_pet');
     } catch (_) {}
@@ -129,10 +157,12 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     pollTimer?.cancel();
     scrollController.dispose();
     if (widget.localSetup == null) localSetup.close();
     for (final c in [
+      name,
       code,
       wifiName,
       wifiPassword,
@@ -201,7 +231,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
 
   void back() {
     if (busy || checking) return;
-    if (step == 0) {
+    if (step == (reconnecting ? 0 : -1)) {
       exitSetup();
       return;
     }
@@ -209,15 +239,24 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
     if (step == 3) {
       addressAnswered = false;
       goTo(1);
+      if (!browser) checkConnection(quiet: true);
     } else {
       goTo(step - 1);
     }
   }
 
+  void confirmName() {
+    if (name.text.trim().isEmpty) {
+      fail('Enter a name for your device.');
+      return;
+    }
+    goTo(0);
+  }
+
   Future<void> findTracker() async {
     if (busy) return;
     if (!TrackerLocalSetup.validDeviceCode(trackerId)) {
-      fail('Enter the PT- code shown in the tracker’s Serial Monitor.');
+      fail('Enter PT- followed by 12 hexadecimal characters (0–9 or A–F).');
       return;
     }
     if (loadingPets) return;
@@ -228,6 +267,15 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
     if (pets.isEmpty || petId == null || !pets.any((p) => p.id == petId)) {
       fail(
         'Add a pet and choose who will wear this tracker before continuing.',
+      );
+      return;
+    }
+    final assignedId = pets.firstWhere((p) => p.id == petId).deviceId;
+    if (assignedId != null &&
+        assignedId.isNotEmpty &&
+        assignedId != trackerId) {
+      fail(
+        'That pet already has a tracker. Choose another pet or unassign the other tracker first.',
       );
       return;
     }
@@ -255,6 +303,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
           provisioning = await data.devicesRepo.provision(
             trackerId,
             backendUrl: AppConfig.baseUrl,
+            name: name.text.trim(),
           );
         } else if (registered != null && savedSecret.text.trim().isEmpty) {
           fail(
@@ -296,10 +345,11 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
     } finally {
       if (mounted) setState(() => busy = false);
     }
+    if (mounted && step == 1 && !browser) await checkConnection(quiet: true);
   }
 
-  Future<void> checkConnection() async {
-    if (busy) return;
+  Future<void> checkConnection({bool quiet = false}) async {
+    if (busy || step != 1) return;
     if (browser) {
       fail(
         'A browser cannot reliably check this local setup address. Join the tracker network in WiFi settings, then continue for the guided alternative.',
@@ -315,20 +365,18 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
     try {
       final answered = await localSetup.checkConnection(trackerId);
       if (!mounted) return;
-      setState(() {
-        addressAnswered = answered;
-        if (answered) {
-          notice = 'The tracker code matches. You can continue.';
-        } else {
-          error =
-              'This does not match your tracker in setup mode. Check the tracker code, firmware, and network name.';
-        }
-      });
-    } catch (e) {
-      fail(
-        'Connect to your tracker’s WiFi in device settings, then return and check again.',
-        e.runtimeType.toString(),
-      );
+      if (answered) {
+        addressAnswered = true;
+        goTo(2);
+      } else if (!quiet) {
+        fail(
+          'This does not match your tracker in setup mode. Check the ID and Wi-Fi network.',
+        );
+      }
+    } catch (_) {
+      if (!quiet) {
+        fail('Join $expectedNetwork in Wi-Fi settings, then try again.');
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -467,40 +515,6 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
     }
   }
 
-  Future<void> renameTracker() async {
-    final nameField = TextEditingController(text: data.deviceName(trackerId));
-    final name = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Name your tracker'),
-        content: TextField(
-          controller: nameField,
-          autofocus: true,
-          maxLength: 40,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            labelText: 'Tracker name',
-            hintText: 'e.g. Milo’s Tracker',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, nameField.text.trim()),
-            child: const Text('Save Name'),
-          ),
-        ],
-      ),
-    );
-    nameField.dispose();
-    if (name == null || name.isEmpty) return;
-    await data.setDeviceName(trackerId, name);
-    if (mounted) setState(() {});
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -511,9 +525,9 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Set Up Tracker'),
+          title: Text(reconnecting ? 'Reconnect Tracker' : 'Add Device'),
           leading: IconButton(
-            tooltip: step == 0 ? 'Leave setup' : 'Previous step',
+            tooltip: displayStep == 1 ? 'Leave setup' : 'Previous step',
             onPressed: busy || checking ? null : back,
             icon: const Icon(Icons.arrow_back),
           ),
@@ -527,7 +541,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
                 children: [
                   Text(
-                    'Step ${step + 1} of 4',
+                    'Step $displayStep of $totalSteps',
                     style: theme.textTheme.labelLarge?.copyWith(
                       color: AppTheme.green,
                       fontWeight: FontWeight.w800,
@@ -535,19 +549,21 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
                   ),
                   const SizedBox(height: 8),
                   LinearProgressIndicator(
-                    value: (step + 1) / 4,
+                    value: displayStep / totalSteps,
                     minHeight: 7,
                     borderRadius: BorderRadius.circular(8),
                     backgroundColor: theme.colorScheme.primary.withValues(
                       alpha: .12,
                     ),
                     color: AppTheme.green,
-                    semanticsLabel: 'Setup progress, step ${step + 1} of 4',
+                    semanticsLabel:
+                        'Setup progress, step $displayStep of $totalSteps',
                   ),
                   const SizedBox(height: 24),
                   header(theme),
                   const SizedBox(height: 24),
                   panel(context, switch (step) {
+                    -1 => nameStep(),
                     0 => findStep(context),
                     1 => connectStep(context),
                     2 => wifiStep(context),
@@ -581,7 +597,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
                     ),
                   const SizedBox(height: 18),
                   actions(),
-                  if (step < 3) ...[
+                  if (step >= 0 && (step < 3 || provisioning != null)) ...[
                     const SizedBox(height: 16),
                     advancedSettings(),
                   ],
@@ -596,7 +612,8 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
 
   Widget header(ThemeData theme) {
     final title = switch (step) {
-      0 => "Let's Set Up Your Pet Tracker",
+      -1 => 'Name Your Device',
+      0 => 'Enter Your Device ID',
       1 => 'Connect to Your Tracker',
       2 => 'Choose Your WiFi Network',
       _ =>
@@ -607,7 +624,8 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
             : 'Connecting Your Tracker',
     };
     final description = switch (step) {
-      0 => "We'll help you connect your tracker in just a few simple steps.",
+      -1 => 'Choose a name you’ll recognize in the app.',
+      0 => 'Enter the PT- ID to start connecting your tracker.',
       1 =>
         "Connect your phone or computer to your tracker's temporary WiFi network.",
       2 =>
@@ -668,6 +686,19 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
     ),
   );
 
+  Widget nameStep() => TextField(
+    controller: name,
+    maxLength: 40,
+    textCapitalization: TextCapitalization.words,
+    textInputAction: TextInputAction.next,
+    decoration: const InputDecoration(
+      labelText: 'Device name',
+      hintText: 'e.g. Milo’s Tracker',
+      prefixIcon: Icon(Icons.label_outline),
+    ),
+    onSubmitted: (_) => confirmName(),
+  );
+
   Widget findStep(BuildContext context) {
     final theme = Theme.of(context);
     return Column(
@@ -689,11 +720,12 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
         const SizedBox(height: 18),
         TextField(
           controller: code,
-          enabled: provisioning == null,
-          textInputAction: TextInputAction.next,
+          enabled: !reconnecting && provisioning == null && !busy,
+          textInputAction: TextInputAction.go,
+          textCapitalization: TextCapitalization.characters,
           autocorrect: false,
           decoration: const InputDecoration(
-            labelText: 'Tracker code',
+            labelText: 'Device ID',
             hintText: 'PT- followed by 12 characters',
             prefixIcon: Icon(Icons.qr_code),
           ),
@@ -702,6 +734,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
             addressAnswered = false;
             error = null;
           }),
+          onSubmitted: (_) => findTracker(),
         ),
         const SizedBox(height: 8),
         Text(
@@ -718,9 +751,9 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
             Colors.amber.shade800,
           ),
           TextButton.icon(
-            onPressed: () {
-              saveProgress();
-              Get.toNamed(Routes.addPet);
+            onPressed: () async {
+              await Get.toNamed(Routes.addPet);
+              if (mounted) await loadPets();
             },
             icon: const Icon(Icons.add),
             label: const Text('Add a Pet'),
@@ -791,7 +824,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
         ),
         const SizedBox(height: 10),
         const Text(
-          'Use the setup password printed in Serial Monitor to join this network. Stay connected even if the phone says it has no internet.',
+          'Join this network using the setup password from Serial Monitor. When you return, the app will check the connection automatically.',
         ),
         const SizedBox(height: 16),
         messageBox(instructions, Icons.settings, AppTheme.green),
@@ -801,14 +834,6 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
           Icons.info_outline,
           Colors.amber.shade800,
         ),
-        if (addressAnswered) ...[
-          const SizedBox(height: 12),
-          messageBox(
-            'The firmware and tracker code match. You can continue.',
-            Icons.check_circle_outline,
-            AppTheme.green,
-          ),
-        ],
         if (browser) ...[
           const SizedBox(height: 12),
           const Text(
@@ -966,7 +991,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
         ),
         const SizedBox(height: 18),
         Text(
-          data.deviceName(trackerId),
+          name.text.trim(),
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.titleLarge,
         ),
@@ -986,25 +1011,20 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
           Text(
             'Last seen: ${DateFormat.yMMMd().add_jm().format(device!.lastSeen!)}',
           ),
-        const SizedBox(height: 8),
-        TextButton.icon(
-          onPressed: renameTracker,
-          icon: const Icon(Icons.edit_outlined),
-          label: const Text('Rename tracker'),
-        ),
       ],
     );
   }
 
   Widget actions() {
     final label = switch (step) {
-      0 => busy ? 'Preparing your tracker...' : 'Find My Tracker',
+      -1 => 'Next',
+      0 => busy ? 'Connecting...' : 'Connect Device',
       1 =>
-        addressAnswered || browser
+        browser
             ? 'Continue'
             : busy
             ? 'Checking connection...'
-            : 'Check Connection',
+            : 'Try Connection Again',
       2 =>
         busy
             ? 'Connecting your tracker...'
@@ -1021,8 +1041,9 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
     final VoidCallback? action = busy || checking
         ? null
         : switch (step) {
+            -1 => confirmName,
             0 => findTracker,
-            1 => addressAnswered || browser ? () => goTo(2) : checkConnection,
+            1 => browser ? () => goTo(2) : checkConnection,
             2 =>
               browser
                   ? () async {
@@ -1064,14 +1085,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
                 ),
           label: Text(label),
         ),
-        if (step == 1 && !browser && addressAnswered) ...[
-          const SizedBox(height: 8),
-          OutlinedButton(
-            onPressed: busy ? null : checkConnection,
-            child: const Text('Check Connection Again'),
-          ),
-        ],
-        if (step > 0 && step < 3) ...[
+        if (displayStep > 1 && step < 3) ...[
           const SizedBox(height: 8),
           TextButton(
             onPressed: busy || checking ? null : back,

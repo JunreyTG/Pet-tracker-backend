@@ -53,6 +53,7 @@ class DeviceService:
             device = self.device_repository.create(
                 DeviceCreate(
                     device_id=data.device_id,
+                    name=data.name,
                     owner_id=owner_id,
                     pet_id=None,
                     status=DeviceStatus.UNREGISTERED,

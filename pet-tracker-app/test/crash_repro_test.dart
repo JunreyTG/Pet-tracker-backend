@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:pet_tracker_app/app/routes/app_pages.dart';
 import 'package:pet_tracker_app/app/routes/app_routes.dart';
 import 'package:pet_tracker_app/app/theme/app_preferences.dart';
 import 'package:pet_tracker_app/core/api/api_client.dart';
+import 'package:pet_tracker_app/core/api/api_exception.dart';
 import 'package:pet_tracker_app/core/services/notification_service.dart';
 import 'package:pet_tracker_app/data/models/models.dart';
 import 'package:pet_tracker_app/data/repositories/repositories.dart';
@@ -16,6 +19,7 @@ import 'package:pet_tracker_app/features/auth/controllers/auth_controller.dart';
 import 'package:pet_tracker_app/features/auth/views/email_settings_screen.dart';
 import 'package:pet_tracker_app/features/auth/views/login_screen.dart';
 import 'package:pet_tracker_app/features/auth/views/register_screen.dart';
+import 'package:pet_tracker_app/features/devices/services/tracker_local_setup.dart';
 import 'package:pet_tracker_app/features/devices/views/device_details_screen.dart';
 import 'package:pet_tracker_app/features/devices/views/device_wifi_setup_screen.dart';
 import 'package:pet_tracker_app/features/devices/views/devices_screen.dart';
@@ -78,6 +82,7 @@ class FakeApiClient extends ApiClient {
   int emailSends = 0;
   bool emailVerified = false;
   bool emailAlerts = false;
+  Map? trackerSetup;
 
   Map<String, dynamic> _emailUserJson() => {
     'uid': 'owner',
@@ -95,6 +100,17 @@ class FakeApiClient extends ApiClient {
   }) async {
     if (path == '/alerts') alertsReads++;
     if (path == '/devices/ESP32_002') return _deviceJson();
+    if (path == '/pets' && trackerSetup != null) {
+      return [
+        {'id': 'p1', 'name': 'Milo', 'species': 'Dog'},
+      ];
+    }
+    if (path == '/devices/PT-012345ABCDEF') {
+      if (trackerSetup?['name'] == null) {
+        throw ApiException('Not found', statusCode: 404);
+      }
+      return {'device_id': 'PT-012345ABCDEF', 'pet_id': 'p1'};
+    }
     if (path.contains('/location-history')) return _historyJson();
     if (path == '/places/countries') {
       return [
@@ -121,6 +137,14 @@ class FakeApiClient extends ApiClient {
 
   @override
   Future<dynamic> post(String path, {Object? body}) async {
+    if (path == '/devices/setup') {
+      trackerSetup = body as Map;
+      return {
+        'device_id': 'PT-012345ABCDEF',
+        'device_secret': 'test-only-secret',
+        'backend_url': trackerSetup?['backend_url'],
+      };
+    }
     if (path == '/auth/email/send') {
       emailSends++;
       return <String, dynamic>{};
@@ -284,6 +308,46 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('connecting by ID probes the tracker automatically', (
+    tester,
+  ) async {
+    final api = Get.find<ApiClient>() as FakeApiClient;
+    api.trackerSetup = {};
+    var probes = 0;
+    final setup = TrackerLocalSetup(
+      client: MockClient((request) async {
+        expect(request.method, 'GET');
+        expect(request.url.path, '/api/status');
+        probes++;
+        return http.Response(
+          '{"protocol":"pet-tracker-c3-v1","setup_mode":true,"device_id":"PT-012345ABCDEF"}',
+          200,
+        );
+      }),
+    );
+    await _pumpScreen(tester, DeviceWifiSetupScreen(localSetup: setup));
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Device name'),
+      'Milo’s Tracker',
+    );
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Device ID'),
+      'PT-012345ABCDEF',
+    );
+    await tester.scrollUntilVisible(
+      find.text('Connect Device'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Connect Device'));
+    await tester.pumpAndSettle();
+    expect(probes, 1);
+    expect(api.trackerSetup?['name'], 'Milo’s Tracker');
+    expect(find.text('Choose Your WiFi Network'), findsOneWidget);
+  });
+
   testWidgets(
     'browser setup gives a truthful guide and supports back navigation',
     (tester) async {
@@ -292,18 +356,26 @@ void main() {
         const DeviceWifiSetupScreen(browserOverride: true),
       );
       await tester.pumpAndSettle();
+      expect(find.widgetWithText(TextField, 'Device ID'), findsNothing);
       await tester.enterText(
-        find.widgetWithText(TextField, 'Tracker code'),
-        'PT-012345ABCDEF',
+        find.widgetWithText(TextField, 'Device name'),
+        'Milo’s Tracker',
+      );
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Device ID'),
+        'pt012345abcdef',
       );
       await tester.scrollUntilVisible(
-        find.text('Find My Tracker'),
+        find.text('Connect Device'),
         200,
         scrollable: find.byType(Scrollable).first,
       );
-      await tester.tap(find.text('Find My Tracker'));
+      await tester.tap(find.text('Connect Device'));
       await tester.pumpAndSettle();
-      expect(find.text('Step 2 of 4'), findsOneWidget);
+      expect(find.text('Step 3 of 5'), findsOneWidget);
+      expect(find.text('PetTracker-ABCDEF'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Continue'),
         200,
@@ -311,7 +383,7 @@ void main() {
       );
       await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
-      expect(find.text('Step 3 of 4'), findsOneWidget);
+      expect(find.text('Step 4 of 5'), findsOneWidget);
       expect(find.text('Finish setup in the Android app'), findsOneWidget);
       expect(find.text('Home WiFi network name'), findsNothing);
       await tester.scrollUntilVisible(
@@ -321,7 +393,7 @@ void main() {
       );
       await tester.tap(find.text('Back'));
       await tester.pumpAndSettle();
-      expect(find.text('Step 2 of 4'), findsOneWidget);
+      expect(find.text('Step 3 of 5'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -335,7 +407,9 @@ void main() {
     }
   });
 
-  testWidgets('tracking focus form builds with place options', (tester) async {
+  testWidgets('live map uses tracker coordinates without a saved focus', (
+    tester,
+  ) async {
     final data = Get.find<AppDataController>();
     data.selectedPet.value = PetModel(
       id: 'p1',
@@ -344,9 +418,13 @@ void main() {
       deviceId: 'ESP32_002',
     );
     await _pumpScreen(tester, const TrackingScreen());
+    final c = Get.find<TrackingController>();
+    await c.fetchLive();
     await tester.pump(const Duration(milliseconds: 500));
     expect(tester.takeException(), isNull);
-    expect(find.text('Setup Focus Map & Start Tracking'), findsOneWidget);
+    expect(find.byType(FlutterMap), findsOneWidget);
+    expect(c.mapController.camera.center.latitude, closeTo(5.01657, .001));
+    expect(c.mapController.camera.center.longitude, closeTo(119.77074, .001));
     if (Get.isRegistered<TrackingController>()) {
       await Get.delete<TrackingController>(force: true);
     }

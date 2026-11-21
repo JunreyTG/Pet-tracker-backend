@@ -245,19 +245,24 @@ class UserProfileService:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account already exists for this email.")
 
         password_salt, password_hash = create_password_hash(password)
+        credential_version = secrets.token_hex(16)
         try:
             document.create({
                 "email": normalized_email,
                 "display_name": name.strip(),
                 "password_salt": password_salt,
                 "password_hash": password_hash,
+                "credential_version": credential_version,
                 "requires_email_verification": True,
                 "created_at": firestore.SERVER_TIMESTAMP,
                 "updated_at": firestore.SERVER_TIMESTAMP,
             })
         except AlreadyExists as exc:
             raise HTTPException(status_code=409, detail="An account already exists for this email.") from exc
-        return AuthenticatedUser(uid=uid, email=normalized_email, display_name=name.strip(), email_verification_required=True)
+        return AuthenticatedUser(
+            uid=uid, email=normalized_email, display_name=name.strip(),
+            credential_version=credential_version, email_verification_required=True,
+        )
 
     def authenticate_user(self, email: str, password: str) -> AuthenticatedUser:
         normalized_email = email.strip().lower()

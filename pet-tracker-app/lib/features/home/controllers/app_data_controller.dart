@@ -49,6 +49,7 @@ class AppDataController extends GetxController with WidgetsBindingObserver {
     final saved = deviceNames[id];
     if (saved != null && saved.isNotEmpty) return saved;
     final device = devices.firstWhereOrNull((item) => item.deviceId == id);
+    if (device?.name case final String name when name.isNotEmpty) return name;
     final pet = pets.firstWhereOrNull((item) => item.id == device?.petId);
     return pet == null ? 'Pet Tracker' : "${pet.name}'s Tracker";
   }

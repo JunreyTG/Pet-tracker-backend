@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import re
 import secrets
 from datetime import UTC, datetime, timedelta
@@ -6,17 +7,19 @@ from hmac import compare_digest
 
 from fastapi import HTTPException
 from firebase_admin import firestore
+from google.api_core.exceptions import GoogleAPIError
 from google.cloud.firestore import Client
 
 from app.firebase.firestore import get_firestore_client
 from app.models.auth import AuthenticatedUser
 from app.services.auth_service import UserProfileService, email_account_state
-from app.services.email_delivery import email_delivery_configured, send_email
+from app.services.email_delivery import EmailDeliveryError, email_delivery_configured, send_email
 
 CODE_LIFETIME = timedelta(minutes=15)
 CODE_RESEND_DELAY = timedelta(minutes=1)
 CODE_SEND_WINDOW = timedelta(days=1)
 SEND_LIMIT = 5
+logger = logging.getLogger(__name__)
 
 
 def _code_digest(uid: str, address: str, code: str) -> str:
@@ -63,16 +66,35 @@ class EmailAccountService(UserProfileService):
                 "email_send_window": window_start,
                 "email_send_count": send_count + 1,
             })
-            return address, digest
+            return address, digest, send_count, profile
 
-        address, digest = reserve(self.client.transaction())
-        send_email(
-            address,
-            "Verify your Pet Tracker email",
-            f"Enter this code in Pet Tracker to verify your email:\n\n{code}\n\n"
-            "The code expires in 15 minutes. If you did not request it, you can ignore this message.",
-            idempotency_key=f"verify-{digest}",
-        )
+        address, digest, prior_count, prior_profile = reserve(self.client.transaction())
+        try:
+            send_email(
+                address,
+                "Verify your Pet Tracker email",
+                f"Enter this code in Pet Tracker to verify your email:\n\n{code}\n\n"
+                "The code expires in 15 minutes. If you did not request it, you can ignore this message.",
+                idempotency_key=f"verify-{digest}",
+            )
+        except EmailDeliveryError:
+            @firestore.transactional
+            def refund(transaction):
+                current = document.get(transaction=transaction).to_dict() or {}
+                if current.get("email_code_hash") != digest:
+                    return
+                # Keep the cooldown, but preserve the previous code and daily allowance.
+                transaction.update(document, {
+                    "email_code_hash": prior_profile.get("email_code_hash", firestore.DELETE_FIELD),
+                    "email_code_expires_at": prior_profile.get("email_code_expires_at", firestore.DELETE_FIELD),
+                    "email_send_count": prior_count,
+                })
+
+            try:
+                refund(self.client.transaction())
+            except GoogleAPIError:
+                logger.warning("Unable to restore verification state after failed email delivery.")
+            raise
 
     def verify(self, user: AuthenticatedUser, code: str) -> dict:
         invalid = "That code is invalid or expired. Request a new code if needed."

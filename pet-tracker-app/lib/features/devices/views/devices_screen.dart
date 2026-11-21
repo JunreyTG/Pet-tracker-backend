@@ -16,14 +16,10 @@ class DevicesScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Collar Management'),
         actions: [
-          IconButton.filledTonal(
-            icon: const Icon(Icons.wifi_tethering),
-            tooltip: 'Set up a tracker',
-            onPressed: () => Get.toNamed(Routes.deviceWifiSetup),
-          ),
           IconButton.filled(
             icon: const Icon(Icons.add),
-            onPressed: () => _register(data),
+            tooltip: 'Add Device',
+            onPressed: () => Get.toNamed(Routes.deviceWifiSetup),
           ),
           const SizedBox(width: 12),
         ],
@@ -33,10 +29,11 @@ class DevicesScreen extends StatelessWidget {
           return EmptyState(
             icon: Icons.sensors,
             title: 'No collars',
-            message: 'Register an ESP32 tracker to assign it to a pet.',
+            message:
+                'Add your tracker to connect it and start tracking your pet.',
             action: FilledButton(
               onPressed: () => Get.toNamed(Routes.deviceWifiSetup),
-              child: const Text('Set Up a Tracker'),
+              child: const Text('Add Device'),
             ),
           );
         }
@@ -104,59 +101,6 @@ class DevicesScreen extends StatelessWidget {
           ),
         );
       }),
-    );
-  }
-
-  void _register(AppDataController data) {
-    final id = TextEditingController();
-    Get.dialog(
-      AlertDialog(
-        title: const Text('Register tracker'),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: TextField(
-            controller: id,
-            decoration: const InputDecoration(
-              labelText: 'Device ID (e.g. ESP32_xxx)',
-              prefixIcon: Icon(Icons.sensors),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: Get.back, child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () async {
-              try {
-                final device = await data.devicesRepo.register(id.text.trim());
-                await data.refreshAll();
-                Get.back();
-                _showSecret(device.deviceSecret ?? '');
-              } catch (e) {
-                Get.snackbar('Registration failed', e.toString());
-              }
-            },
-            child: const Text('Register'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showSecret(String secret) {
-    Get.dialog(
-      AlertDialog(
-        title: const Text('Device Secret'),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: SelectableText(
-            'Save this now. It is shown only once and is needed by the ESP32 collar.\n\n$secret',
-          ),
-        ),
-        actions: [
-          FilledButton(onPressed: Get.back, child: const Text('I saved it')),
-        ],
-      ),
-      barrierDismissible: false,
     );
   }
 }

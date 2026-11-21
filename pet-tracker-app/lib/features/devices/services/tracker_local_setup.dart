@@ -14,6 +14,13 @@ class TrackerLocalSetup {
 
   static bool validDeviceCode(String code) => _deviceCode.hasMatch(code);
 
+  static String normalizeDeviceCode(String input) {
+    final code = input.trim().toUpperCase();
+    return RegExp(r'^PT[0-9A-F]{12}$').hasMatch(code)
+        ? 'PT-${code.substring(2)}'
+        : code;
+  }
+
   static String newSetupNonce() {
     final random = Random.secure();
     return List.generate(

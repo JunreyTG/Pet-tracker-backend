@@ -1,12 +1,18 @@
 from datetime import datetime
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.models.entities import DeviceStatus, FirestoreModel, Location
 
 
 class DeviceRegisterRequest(FirestoreModel):
     device_id: str = Field(min_length=1, max_length=128)
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def trim_name(cls, name: str | None) -> str | None:
+        return name.strip() if isinstance(name, str) else name
 
 
 class DeviceProvisioningRequest(DeviceRegisterRequest):
@@ -21,6 +27,7 @@ class DeviceResponse(FirestoreModel):
     id: str
     device_id: str
     owner_id: str
+    name: str | None = None
     pet_id: str | None = None
     status: DeviceStatus
     battery_level: int | None = Field(default=None, ge=0, le=100)

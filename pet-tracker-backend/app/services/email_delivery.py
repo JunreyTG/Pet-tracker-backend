@@ -13,7 +13,10 @@ class EmailDeliveryError(RuntimeError):
 
 def email_delivery_configured() -> bool:
     key = settings.brevo_api_key
-    return bool(key and key.get_secret_value().strip() and settings.alert_email_from)
+    value = key.get_secret_value().strip() if key else ""
+    return bool(value and value not in {
+        "replace-with-your-brevo-api-key", "xkeysib-your-api-key", "xkeysib-...",
+    } and settings.alert_email_from)
 
 
 def send_email(recipient: str, subject: str, text: str, *, idempotency_key: str) -> None:
@@ -23,7 +26,7 @@ def send_email(recipient: str, subject: str, text: str, *, idempotency_key: str)
     try:
         response = httpx.post(
             "https://api.brevo.com/v3/smtp/email",
-            headers={"api-key": key.get_secret_value(), "accept": "application/json"},
+            headers={"api-key": key.get_secret_value().strip(), "accept": "application/json"},
             json={
                 "sender": {"name": "Pet Tracker", "email": str(settings.alert_email_from)},
                 "to": [{"email": recipient}],

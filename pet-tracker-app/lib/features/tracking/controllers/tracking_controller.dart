@@ -36,6 +36,8 @@ class TrackingController extends GetxController with WidgetsBindingObserver {
   final historyLoading = false.obs;
   final historyError = ''.obs;
   Timer? _timer;
+  Worker? _selectedPetWorker;
+  String? _centeredDeviceId;
   bool mapReady = false;
   bool _livePending = false;
   int _historyGeneration = 0;
@@ -77,6 +79,12 @@ class TrackingController extends GetxController with WidgetsBindingObserver {
   void onInit() {
     super.onInit();
     WidgetsBinding.instance.addObserver(this);
+    if (_requestedDevice == null) {
+      _selectedPetWorker = ever(data.selectedPet, (_) {
+        if (mode.value == 'live') fetchLive();
+      });
+    }
+    startLivePolling();
     _initialize();
   }
 
@@ -96,10 +104,6 @@ class TrackingController extends GetxController with WidgetsBindingObserver {
       _restoreSavedFocus();
     } finally {
       focusLoading.value = false;
-    }
-    if (!isClosed) {
-      startLivePolling();
-      await loadCountries();
     }
   }
 
@@ -230,15 +234,19 @@ class TrackingController extends GetxController with WidgetsBindingObserver {
     }
     _livePending = true;
     if (!silent) loading.value = true;
-    error.value = '';
     try {
       final collar = await data.devicesRepo.get(id);
-      if (!isClosed && id == deviceId) device.value = collar;
+      if (!isClosed && id == deviceId) {
+        error.value = '';
+        device.value = collar;
+        WidgetsBinding.instance.addPostFrameCallback((_) => centerOnFirstFix());
+      }
     } catch (e) {
       if (!isClosed && id == deviceId) error.value = e.toString();
     } finally {
       _livePending = false;
       if (!isClosed) loading.value = false;
+      if (!isClosed && id != deviceId) unawaited(fetchLive());
     }
   }
 
@@ -378,6 +386,21 @@ class TrackingController extends GetxController with WidgetsBindingObserver {
     if (point != null) mapController.move(point, 16);
   }
 
+  void centerOnFirstFix() {
+    final id = deviceId;
+    final point = liveLatLng;
+    if (isClosed ||
+        !mapReady ||
+        mode.value != 'live' ||
+        id == null ||
+        point == null ||
+        id == _centeredDeviceId) {
+      return;
+    }
+    _centeredDeviceId = id;
+    mapController.move(point, 16);
+  }
+
   List<LatLng> _uniquePoints(Iterable<LatLng> points) {
     final unique = <LatLng>[];
     for (final point in points) {
@@ -401,6 +424,7 @@ class TrackingController extends GetxController with WidgetsBindingObserver {
   @override
   void onClose() {
     _timer?.cancel();
+    _selectedPetWorker?.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.onClose();
   }

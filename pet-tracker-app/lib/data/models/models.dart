@@ -175,6 +175,7 @@ class DeviceModel {
   DeviceModel({
     required this.id,
     required this.deviceId,
+    this.name,
     this.petId,
     required this.status,
     this.batteryLevel,
@@ -188,6 +189,7 @@ class DeviceModel {
   });
   final String id;
   final String deviceId;
+  final String? name;
   final String? petId;
   final String status;
   final int? batteryLevel;
@@ -202,6 +204,7 @@ class DeviceModel {
   factory DeviceModel.fromJson(Map<String, dynamic> json) => DeviceModel(
     id: json['id']?.toString() ?? json['device_id']?.toString() ?? '',
     deviceId: json['device_id']?.toString() ?? '',
+    name: json['name'] as String?,
     petId: json['pet_id']?.toString(),
     status: json['status']?.toString() ?? 'unregistered',
     batteryLevel: parseIntOrNull(json['battery_level']),

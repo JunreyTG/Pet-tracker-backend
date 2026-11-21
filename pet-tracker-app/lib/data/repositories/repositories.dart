@@ -189,11 +189,16 @@ class DeviceRepository {
   Future<DeviceProvisioningModel> provision(
     String id, {
     required String backendUrl,
+    String? name,
   }) async => DeviceProvisioningModel.fromJson(
     Map<String, dynamic>.from(
       await _api.post(
         '/devices/setup',
-        body: {'device_id': id, 'backend_url': backendUrl},
+        body: {
+          'device_id': id,
+          'backend_url': backendUrl,
+          'name': ?name,
+        },
       ),
     ),
   );

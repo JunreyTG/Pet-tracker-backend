@@ -96,6 +96,7 @@ class Pet(PetBase):
 
 class DeviceBase(FirestoreModel):
     device_id: str = Field(min_length=1)
+    name: str | None = Field(default=None, min_length=1, max_length=40)
     owner_id: str = Field(min_length=1)
     pet_id: str | None = None
     status: DeviceStatus = DeviceStatus.UNREGISTERED

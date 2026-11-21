@@ -329,6 +329,17 @@ def test_new_registration_requires_control_of_the_email_address(monkeypatch) -> 
     assert len(delivered) == 1 and delivered[0][0] == payload["email"]
     code = delivered[0][1]
     assert document.data["email_code_hash"] != code
+    original_hash = document.data["email_code_hash"]
+    document.data["email_code_sent_at"] -= timedelta(minutes=2)
+
+    def reject_delivery(*args, **kwargs):
+        raise email_account_service.EmailDeliveryError("Rejected")
+
+    monkeypatch.setattr(email_account_service, "send_email", reject_delivery)
+    assert client.post(send, headers=headers).status_code == 503
+    assert document.data["email_code_hash"] == original_hash
+    assert document.data["email_send_count"] == 1
+    assert client.post(send, headers=headers).status_code == 429
     verify = "/api/v1/auth/email/verify"
     assert client.post(verify, json={"code": "X" * 16}, headers=headers).status_code == 400
     expiry = document.data["email_code_expires_at"]
@@ -343,3 +354,9 @@ def test_new_registration_requires_control_of_the_email_address(monkeypatch) -> 
     assert client.post(verify, json={"code": code}, headers=headers).status_code == 400
     assert client.patch(pref, json={"enabled": True}, headers=headers).json()["email_alerts_enabled"] is True
     assert client.patch(pref, json={"enabled": False}, headers=headers).json()["email_alerts_enabled"] is False
+
+    # Re-registering a deleted account must not make an old session valid again.
+    document.exists = False
+    assert client.get("/api/v1/auth/me", headers=headers).status_code == 401
+    assert client.post("/api/v1/auth/register", json=payload).status_code == 201
+    assert client.get("/api/v1/auth/me", headers=headers).status_code == 401

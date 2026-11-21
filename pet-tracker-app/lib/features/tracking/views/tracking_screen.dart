@@ -33,12 +33,6 @@ class TrackingScreen extends StatelessWidget {
             message: 'Assign a tracker to a pet first.',
           );
         }
-        if (!c.focusSet.value && c.focusLoading.value) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (!c.focusSet.value) {
-          return _MapFocusPrompt(controller: c);
-        }
         if (c.mode.value == 'live' &&
             c.loading.value &&
             c.currentDevice == null) {
@@ -60,8 +54,8 @@ class TrackingScreen extends StatelessWidget {
 
         final live = c.liveLatLng;
         final center =
-            c.focusCenter.value ??
             live ??
+            c.focusCenter.value ??
             (c.history.isNotEmpty
                 ? LatLng(c.history.last.latitude, c.history.last.longitude)
                 : const LatLng(14.5995, 120.9842));
@@ -79,7 +73,11 @@ class TrackingScreen extends StatelessWidget {
                 initialZoom: 16,
                 onMapReady: () {
                   c.mapReady = true;
-                  if (c.mode.value == 'history') c.fitHistory();
+                  if (c.mode.value == 'history') {
+                    c.fitHistory();
+                  } else {
+                    c.centerOnFirstFix();
+                  }
                 },
               ),
               children: [
@@ -436,7 +434,9 @@ class _CollapsiblePetCardState extends State<_CollapsiblePetCard> {
               children: [
                 Expanded(
                   child: Text(
-                    'Focus: ${c.focusLabel}',
+                    c.focusLabel.isEmpty
+                        ? 'No map focus set'
+                        : 'Focus: ${c.focusLabel}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall,
@@ -445,9 +445,9 @@ class _CollapsiblePetCardState extends State<_CollapsiblePetCard> {
                 TextButton.icon(
                   onPressed: () => Get.toNamed(Routes.mapFocus),
                   icon: const Icon(Icons.edit_location_alt, size: 16),
-                  label: const Text(
-                    'Edit Focus',
-                    style: TextStyle(fontSize: 12),
+                  label: Text(
+                    c.focusLabel.isEmpty ? 'Set Map Focus' : 'Edit Focus',
+                    style: const TextStyle(fontSize: 12),
                   ),
                   style: TextButton.styleFrom(
                     visualDensity: VisualDensity.compact,
@@ -457,9 +457,14 @@ class _CollapsiblePetCardState extends State<_CollapsiblePetCard> {
               ],
             ),
             if (c.mode.value == 'live' &&
-                (widget.live == null || c.currentDevice?.gpsFix == false))
+                (c.error.value.isNotEmpty ||
+                    c.currentDevice?.status == 'offline' ||
+                    widget.live == null ||
+                    c.currentDevice?.gpsFix == false))
               Text(
-                c.currentDevice?.status == 'offline'
+                c.error.value.isNotEmpty
+                    ? 'Cannot reach the tracker backend — showing last known data.'
+                    : c.currentDevice?.status == 'offline'
                     ? 'Tracker is offline.'
                     : 'Waiting for GPS${widget.live == null ? '.' : ' — showing last known location.'}',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -497,80 +502,6 @@ class _CollapsiblePetCardState extends State<_CollapsiblePetCard> {
               );
             }),
         ],
-      ),
-    );
-  }
-}
-
-class _MapFocusPrompt extends StatelessWidget {
-  const _MapFocusPrompt({required this.controller});
-
-  final TrackingController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 440),
-          child: Card(
-            child: Padding(
-              padding: const EdgeInsets.all(26),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 72,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      color: AppTheme.green.withValues(alpha: .12),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.travel_explore,
-                      size: 40,
-                      color: AppTheme.green,
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Text(
-                    'Setup Focus Map',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Choose your tracking area on the interactive map so the app knows where to center.',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 22),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: () => Get.toNamed(Routes.mapFocus),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.green,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                      icon: const Icon(Icons.map),
-                      label: const Text(
-                        'Setup Focus Map & Start Tracking',
-                        style: TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }

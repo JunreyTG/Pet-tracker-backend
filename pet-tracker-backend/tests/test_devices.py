@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.models.auth import AuthenticatedUser
 from app.models.entities import Device, DeviceCreate, DeviceStatus, DeviceUpdate, Pet
+from app.schemas.devices import DeviceRegisterRequest
 from app.services.auth_service import get_current_user
 from app.services.device_credentials import hash_device_secret, verify_device_secret
 from app.services.device_service import (
@@ -75,7 +76,7 @@ class FakeDeviceApiService:
         if data.device_id == "duplicate-device":
             raise DeviceConflictError("Device is already registered.")
         return DeviceRegistration(
-            device=make_device(device_id=data.device_id, owner_id=owner_id, device_secret_hash="hash"),
+            device=make_device(device_id=data.device_id, owner_id=owner_id, device_secret_hash="hash").model_copy(update={"name": data.name}),
             device_secret="raw-secret",
         )
 
@@ -255,11 +256,12 @@ def test_authenticated_user_can_create_device_provisioning(fake_device_api_servi
 
 
 def test_c3_provisioning_returns_matching_hotspot(fake_device_api_service: FakeDeviceApiService) -> None:
-    payload = {"device_id": "PT-012345ABCDEF", "backend_url": "https://backend.example"}
+    payload = {"device_id": "PT-012345ABCDEF", "backend_url": "https://backend.example", "name": "  Milo’s Tracker  "}
     response = client.post("/api/v1/devices/setup", json=payload)
     assert response.status_code == 201
     assert response.json()["setup_hotspot_ssid"] == "PetTracker-ABCDEF"
     assert response.json()["setup_url"] == "http://192.168.4.1/config"
+    assert response.json()["name"] == "Milo’s Tracker"
     response = client.post("/api/v1/devices/setup", json={**payload, "backend_url": "http://backend.example"})
     assert response.status_code == 422
 
@@ -333,7 +335,11 @@ def test_device_service_registers_with_hashed_credential(monkeypatch) -> None:
 
     monkeypatch.setattr("app.services.device_service.generate_device_secret", lambda: "raw-secret")
 
-    registration = service.register_device("owner-1", data=type("Request", (), {"device_id": "PET-ESP32-100"})())
+    registration = service.register_device(
+        "owner-1", DeviceRegisterRequest(device_id="PET-ESP32-100", name="Milo’s Tracker")
+    )
+    assert device_repository.created is not None
+    assert device_repository.created.name == "Milo’s Tracker"
 
     assert registration.device_secret == "raw-secret"
     assert device_repository.created is not None

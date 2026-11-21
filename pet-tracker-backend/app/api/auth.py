@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
 from google.api_core.exceptions import GoogleAPIError
 
+from app.firebase.admin import FirebaseInitializationError
 from app.models.auth import AuthResponse, AuthenticatedUser, CurrentUserResponse, EmailAlertsRequest, EmailVerificationRequest, LoginRequest, PasswordChangeRequest, ProfileUpdateRequest, RegisterRequest
 from app.services.auth_service import UserProfileService, authenticate_with_password, create_access_token, get_current_user, get_session_user, register_with_password, sync_current_user_profile
 from app.services.email_account_service import EmailAccountService
@@ -54,7 +55,7 @@ def change_password(data: PasswordChangeRequest, current_user: AuthenticatedUser
 def send_verification_email(user: AuthenticatedUser = Depends(get_session_user)) -> Response:
     try:
         EmailAccountService().send_verification(user)
-    except (GoogleAPIError, EmailDeliveryError) as exc:
+    except (FirebaseInitializationError, GoogleAPIError, EmailDeliveryError) as exc:
         raise HTTPException(status_code=503, detail="Could not send a verification email. Try again in a minute.") from exc
     return Response(status_code=204)
 
@@ -63,7 +64,7 @@ def send_verification_email(user: AuthenticatedUser = Depends(get_session_user))
 def verify_email(data: EmailVerificationRequest, user: AuthenticatedUser = Depends(get_session_user)) -> dict:
     try:
         return EmailAccountService().verify(user, data.code)
-    except GoogleAPIError as exc:
+    except (FirebaseInitializationError, GoogleAPIError) as exc:
         raise HTTPException(status_code=503, detail="Email verification is temporarily unavailable.") from exc
 
 

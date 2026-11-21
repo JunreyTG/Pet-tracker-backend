@@ -106,7 +106,9 @@ def create_device_provisioning(
                 valid = False
             if not valid:
                 raise HTTPException(status_code=422, detail="An HTTPS backend origin is required for ESP32-C3 setup.")
-        registration = device_service.register_device(current_user.uid, DeviceRegisterRequest(device_id=data.device_id))
+        registration = device_service.register_device(
+            current_user.uid, DeviceRegisterRequest(device_id=data.device_id, name=data.name)
+        )
         return _provisioning_payload(registration, backend_url)
     except DeviceConflictError as exc:
         raise _conflict("Device is already registered. Use the saved device secret or register a new tracker ID.") from exc

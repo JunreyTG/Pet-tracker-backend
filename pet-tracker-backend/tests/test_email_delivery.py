@@ -47,3 +47,9 @@ def test_send_email_raises_when_brevo_rejects_the_message(monkeypatch) -> None:
 
     with pytest.raises(email_delivery.EmailDeliveryError):
         email_delivery.send_email("owner@example.com", "Verify", "Your code", idempotency_key="verify-abc")
+
+
+def test_sample_key_is_not_treated_as_configured(monkeypatch) -> None:
+    _configure(monkeypatch)
+    monkeypatch.setattr(email_delivery.settings, "brevo_api_key", SecretStr("replace-with-your-brevo-api-key"))
+    assert not email_delivery.email_delivery_configured()
