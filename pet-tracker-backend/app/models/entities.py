@@ -104,6 +104,8 @@ class DeviceBase(FirestoreModel):
     current_location: Location | None = None
     last_seen: datetime | None = None
     last_location_update: datetime | None = None
+    setup_nonce: str | None = None
+    gps_fix: bool | None = None
     low_battery_alert_active: bool = False
 
 
@@ -120,6 +122,8 @@ class DeviceUpdate(FirestoreModel):
     current_location: Location | None = None
     last_seen: datetime | None = None
     last_location_update: datetime | None = None
+    setup_nonce: str | None = None
+    gps_fix: bool | None = None
     low_battery_alert_active: bool | None = None
 
 

@@ -3,10 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
-import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../app/routes/app_routes.dart';
 import '../constants/app_config.dart';
 import 'api_exception.dart';
 
@@ -15,6 +13,8 @@ class ApiClient {
   final _cache = <String, _CachedResponse>{};
   final _pendingGets = <String, Future<dynamic>>{};
   String? _authToken;
+  void Function()? onSessionExpired;
+  int _cacheGeneration = 0;
   static const _tokenStorageKey = 'pet_tracker_jwt_token';
 
   bool get hasAuthToken => _authToken != null && _authToken!.isNotEmpty;
@@ -33,17 +33,21 @@ class ApiClient {
   void setAuthToken(String token) {
     _authToken = token;
     _clearCache();
-    SharedPreferences.getInstance().then((prefs) {
-      prefs.setString(_tokenStorageKey, token);
-    }).catchError((_) {});
+    SharedPreferences.getInstance()
+        .then((prefs) {
+          prefs.setString(_tokenStorageKey, token);
+        })
+        .catchError((_) {});
   }
 
   void clearAuthToken() {
     _authToken = null;
     _clearCache();
-    SharedPreferences.getInstance().then((prefs) {
-      prefs.remove(_tokenStorageKey);
-    }).catchError((_) {});
+    SharedPreferences.getInstance()
+        .then((prefs) {
+          prefs.remove(_tokenStorageKey);
+        })
+        .catchError((_) {});
   }
 
   Future<dynamic> get(String path, {Map<String, String?> query = const {}}) =>
@@ -85,6 +89,7 @@ class ApiClient {
         encoded,
         cacheDuration,
         cacheKey,
+        _cacheGeneration,
       );
       if (cacheDuration != null) _pendingGets[cacheKey] = request;
       final responseData = await request;
@@ -109,6 +114,7 @@ class ApiClient {
     String? encoded,
     Duration? cacheDuration,
     String cacheKey,
+    int generation,
   ) async {
     try {
       final response = await _httpRequest(
@@ -117,15 +123,18 @@ class ApiClient {
         headers,
         encoded,
       ).timeout(const Duration(seconds: 20));
-      if (response.statusCode == 401 && hasAuthToken) {
+      if (response.statusCode == 401 &&
+          hasAuthToken &&
+          headers['Authorization'] == 'Bearer $_authToken' &&
+          !uri.path.endsWith('/auth/login')) {
         clearAuthToken();
-        Get.offAllNamed(Routes.login);
+        onSessionExpired?.call();
       }
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final decoded = response.body.isEmpty
             ? null
             : jsonDecode(response.body);
-        if (cacheDuration != null) {
+        if (cacheDuration != null && generation == _cacheGeneration) {
           _cache[cacheKey] = _CachedResponse(
             decoded,
             DateTime.now().add(cacheDuration),
@@ -135,7 +144,9 @@ class ApiClient {
       }
       throw ApiException(_message(response), statusCode: response.statusCode);
     } finally {
-      _pendingGets.remove(cacheKey);
+      if (cacheDuration != null && generation == _cacheGeneration) {
+        _pendingGets.remove(cacheKey);
+      }
     }
   }
 
@@ -160,12 +171,14 @@ class ApiClient {
   Duration? _cacheDuration(String method, String path) {
     if (method != 'GET') return null;
     if (path.startsWith('/devices')) return null;
+    if (path.startsWith('/auth/')) return null;
     if (path.contains('/location-history')) return null;
     if (path.startsWith('/places')) return const Duration(days: 1);
     return const Duration(seconds: 20);
   }
 
   void _clearCache() {
+    _cacheGeneration++;
     _cache.clear();
     _pendingGets.clear();
   }

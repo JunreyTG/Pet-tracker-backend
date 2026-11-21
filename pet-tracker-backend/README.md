@@ -2,7 +2,7 @@
 
 FastAPI backend foundation for an ESP32 GPS pet tracking system.
 
-This project currently includes the backend API foundation, Firebase Admin SDK initialization, Firebase Authentication verification, Firestore repositories, pet/device management, device telemetry ingestion, heartbeat/offline detection, geofencing, alert records, and Firebase Cloud Messaging delivery services. Mobile application features are intentionally not implemented yet.
+This project currently includes the backend API foundation, Firebase Admin SDK initialization, custom owner authentication, Firestore repositories, pet/device management, device telemetry ingestion, heartbeat/offline detection, geofencing, alert records, Firebase Cloud Messaging delivery, and Brevo-backed email verification and alerts.
 
 ## Tech Stack
 
@@ -74,6 +74,8 @@ FIREBASE_PROJECT_ID="your-firebase-project-id"
 DEVICE_OFFLINE_THRESHOLD_SECONDS=300
 DEVICE_HEARTBEAT_CHECK_INTERVAL_SECONDS=60
 LOW_BATTERY_THRESHOLD_PERCENT=20
+BREVO_API_KEY="xkeysib-your-api-key"
+ALERT_EMAIL_FROM="alerts@yourdomain.com"
 ```
 
 `FIREBASE_PROJECT_ID` is optional if the service-account JSON contains the correct `project_id`, but setting it makes the local configuration explicit.
@@ -82,7 +84,7 @@ The `.credentials/` and `credentials/` directories and JSON credential files are
 
 ## Heartbeat / Offline Detection
 
-Successful ESP32 telemetry updates `devices/{device_id}.last_seen`. The backend heartbeat service uses that timestamp to determine whether a tracker has stopped communicating.
+Successful ESP32 telemetry or `POST /api/v1/device/heartbeat` updates `devices/{device_id}.last_seen`. A heartbeat uses the same device credentials as telemetry but doesn't write a location or run geofencing. Trackers without a battery gauge can omit `battery_level` from GPS telemetry.
 
 The default offline threshold is 300 seconds, or 5 minutes. Configure it with:
 
@@ -96,7 +98,7 @@ Devices with `last_seen = null`, `unregistered` devices, and `disabled` devices 
 
 Offline detection can create persistent alerts and FCM notifications. It does not run geofence checks.
 
-The FastAPI app starts a best-effort in-process heartbeat loop on startup and stops it during shutdown. This is suitable for local development and simple single-worker deployments. For multi-worker production deployments, use a single external scheduler/worker to avoid duplicate checks.
+For local single-worker deployments, FastAPI runs an in-process offline check. On Vercel or when `DEVICE_OFFLINE_CHECK_SECRET` is set, that loop is disabled. Configure a single external scheduler to send `POST /internal/check-offline` with `Authorization: Bearer <DEVICE_OFFLINE_CHECK_SECRET>` (at least 32 random characters). Configure the job to run about once per minute and avoid overlapping calls. Offline alerts need this job on Vercel; the scheduler is not provisioned by the repository.
 
 ## Location History
 
@@ -163,6 +165,27 @@ OUTSIDE -> OUTSIDE  = none
 Valid device telemetry triggers geofence checks for all enabled geofences assigned to the telemetry device's pet. Disabled geofences are skipped. Offline detection does not trigger geofence transitions because only fresh GPS telemetry can establish movement.
 
 Alerts and FCM delivery are handled by later alert/notification services; geofence evaluation itself only returns transition results.
+
+## Email Verification and Alerts
+
+New registrations require a working email address. `POST /api/v1/auth/register` creates the account with `email_verification_required: true`; the client then requests a 16-character verification code through Brevo via `POST /api/v1/auth/email/send`. Until the code is confirmed, the account can call `/api/v1/auth/me` but owner endpoints return `403`, so the client can finish verification.
+
+Configure transactional email with:
+
+```text
+BREVO_API_KEY="xkeysib-..."
+ALERT_EMAIL_FROM="alerts@yourdomain.com"
+```
+
+`ALERT_EMAIL_FROM` must be a bare, verified sender address in Brevo. Emails are sent with the display name `Pet Tracker`. When either value is missing, registration returns `503`.
+
+```text
+POST  /api/v1/auth/email/send    # send or resend a verification code (1/min, 5/day)
+POST  /api/v1/auth/email/verify  # body: {"code": "0123456789ABCDEF"}
+PATCH /api/v1/auth/email/alerts  # body: {"enabled": true}
+```
+
+Verification codes are stored as SHA-256 hashes, expire after 15 minutes, and are single-use. Email alerts are opt-in, only sent to verified addresses after an alert record is stored, and are delivered independently of FCM.
 
 ## Alerts
 
@@ -307,7 +330,7 @@ FCM data includes string values for `alert_id`, `type`, `pet_id`, and `device_id
 
 If Firebase reports an FCM token as invalid or unregistered, the backend marks that token inactive and continues processing. If FCM delivery fails, the alert remains stored and the original event processing continues.
 
-Push notification delivery is implemented only through Firebase Admin SDK server-side FCM. No Flutter mobile code, WebSockets, SMS, email, scheduler, or background worker is implemented.
+Push notification delivery uses Firebase Admin SDK server-side FCM. Email alerts use Brevo (see Email Verification and Alerts). No WebSockets, SMS, or background worker is implemented; Vercel deployments need an external scheduler for offline checks.
 
 ## Firebase Verification
 
@@ -324,6 +347,8 @@ Firebase verification succeeded: Admin SDK initialized and Firestore responded.
 ```
 
 This verification does not create application-specific collections or documents.
+
+Use `GET /ready` on the running backend to probe Firestore read connectivity. It returns `200` if Firestore answered, even if the probe document does not exist, or `503` if Firebase initialization or the read failed. `GET /health` remains a process-only check.
 
 ## Run
 

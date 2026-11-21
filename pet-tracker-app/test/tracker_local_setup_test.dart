@@ -6,137 +6,117 @@ import 'package:http/testing.dart';
 import 'package:pet_tracker_app/data/models/models.dart';
 import 'package:pet_tracker_app/features/devices/services/tracker_local_setup.dart';
 
+const trackerId = 'PT-012345ABCDEF';
+const nonce = '0bf93a862aad4928a236e42e0a20b926';
+
+http.Response status({String id = trackerId, bool setupMode = true}) =>
+    http.Response(
+      jsonEncode({
+        'protocol': TrackerLocalSetup.protocol,
+        'device_id': id,
+        'setup_mode': setupMode,
+      }),
+      200,
+    );
+
+Future<TrackerDelivery> configure(TrackerLocalSetup setup) =>
+    setup.sendConfiguration(
+      wifiName: 'Home Network',
+      wifiPassword: 'sample-password',
+      hotspotPassword: 'aabbccdd44556677',
+      deviceId: trackerId,
+      deviceSecret: 'private-key',
+      backendUrl: 'https://example.com/',
+      setupNonce: nonce,
+    );
+
 void main() {
-  final endpoint = Uri.parse('http://192.168.4.1/config');
+  test('an unrelated device never receives setup credentials', () async {
+    final setup = TrackerLocalSetup(
+      client: MockClient((request) async {
+        expect(request.method, 'GET');
+        expect(request.url.toString(), 'http://192.168.4.1/api/status');
+        expect(request.followRedirects, isFalse);
+        return status(id: 'PT-012345111111');
+      }),
+    );
+    await expectLater(
+      configure(setup),
+      throwsA(isA<TrackerIdentityMismatch>()),
+    );
+  });
+
+  test('legacy and non-setup endpoints cannot confirm identity', () async {
+    for (final reply in [http.Response('', 405), status(setupMode: false)]) {
+      final setup = TrackerLocalSetup(client: MockClient((_) async => reply));
+      expect(await setup.checkConnection(trackerId), isFalse);
+    }
+  });
 
   test(
-    'GET 405 confirms the documented POST-only setup address answered',
+    'matching setup posts credentials only to the fixed local endpoint',
     () async {
       final setup = TrackerLocalSetup(
         client: MockClient((request) async {
-          expect(request.method, 'GET');
-          expect(request.url, endpoint);
-          return http.Response('', 405);
-        }),
-      );
-      expect(await setup.checkConnection(endpoint), isTrue);
-    },
-  );
-
-  test(
-    'missing setup address cannot be mistaken for a connected tracker',
-    () async {
-      final setup = TrackerLocalSetup(
-        client: MockClient((_) async => http.Response('', 404)),
-      );
-      expect(await setup.checkConnection(endpoint), isFalse);
-    },
-  );
-
-  test(
-    'configuration uses existing firmware JSON contract without URL secrets',
-    () async {
-      final setup = TrackerLocalSetup(
-        client: MockClient((request) async {
-          expect(request.method, 'POST');
-          expect(request.url, endpoint);
-          expect(request.url.toString(), isNot(contains('private-key')));
-          final body = jsonDecode(request.body) as Map<String, dynamic>;
-          expect(body['wifi_ssid'], 'Home Network');
-          expect(body['wifi_password'], 'sample-password');
-          expect(body['device_id'], 'ESP32_123');
-          expect(body['device_secret'], 'private-key');
-          expect(body['backend_url'], 'https://example.com');
-          expect(
-            body['telemetry_url'],
-            'https://example.com/api/v1/device/telemetry',
+          if (request.method == 'GET') return status();
+          expect(request.url, TrackerLocalSetup.endpoint);
+          expect(request.followRedirects, isFalse);
+          expect(request.headers['x-tracker-key'], 'aabbccdd44556677');
+          expect(jsonDecode(request.body), {
+            'wifi_ssid': 'Home Network',
+            'wifi_password': 'sample-password',
+            'device_id': trackerId,
+            'device_secret': 'private-key',
+            'backend_url': 'https://example.com',
+            'setup_nonce': nonce,
+          });
+          return http.Response(
+            jsonEncode({'accepted': true, 'device_id': trackerId}),
+            202,
           );
-          return http.Response('', 200);
         }),
       );
-      expect(
-        await setup.sendConfiguration(
-          endpoint: endpoint,
-          wifiName: 'Home Network',
-          wifiPassword: 'sample-password',
-          deviceId: 'ESP32_123',
-          deviceSecret: 'private-key',
-          backendUrl: 'https://example.com/',
-        ),
-        TrackerDelivery.accepted,
-      );
+      expect(await configure(setup), TrackerDelivery.accepted);
     },
   );
 
-  test(
-    'restarting tracker leaves delivery unconfirmed, not successful',
-    () async {
-      final setup = TrackerLocalSetup(
-        client: MockClient((_) async {
-          throw http.ClientException('connection closed');
-        }),
-      );
-      expect(
-        await setup.sendConfiguration(
-          endpoint: endpoint,
-          wifiName: 'Home',
-          wifiPassword: 'wrong',
-          deviceId: 'ESP32_123',
-          deviceSecret: 'secret',
-          backendUrl: 'https://example.com',
-        ),
-        TrackerDelivery.unconfirmed,
-      );
-    },
-  );
+  test('reboot during delivery requires cloud confirmation', () async {
+    final setup = TrackerLocalSetup(
+      client: MockClient((request) async {
+        if (request.method == 'GET') return status();
+        throw http.ClientException('connection closed');
+      }),
+    );
+    expect(await configure(setup), TrackerDelivery.unconfirmed);
+  });
 
   test('rejected configuration stays an error', () async {
     final setup = TrackerLocalSetup(
-      client: MockClient((_) async => http.Response('', 400)),
-    );
-    expect(
-      () => setup.sendConfiguration(
-        endpoint: endpoint,
-        wifiName: 'Home',
-        wifiPassword: 'wrong',
-        deviceId: 'ESP32_123',
-        deviceSecret: 'secret',
-        backendUrl: 'https://example.com',
+      client: MockClient(
+        (request) async =>
+            request.method == 'GET' ? status() : http.Response('', 403),
       ),
+    );
+    await expectLater(
+      configure(setup),
       throwsA(isA<TrackerConfigurationRejected>()),
     );
   });
 
-  test('success requires fresh authenticated backend telemetry', () {
-    final started = DateTime(2026, 10, 24, 10);
-    DeviceModel device(String status, DateTime? seen) => DeviceModel(
-      id: 'ESP32_123',
-      deviceId: 'ESP32_123',
-      status: status,
-      lastSeen: seen,
-      lowBatteryAlertActive: false,
-    );
-    expect(
-      hasFreshOnlineReport(
-        device('online', started.subtract(const Duration(minutes: 2))),
-        started,
-      ),
-      isFalse,
-    );
-    expect(
-      hasFreshOnlineReport(
-        device('offline', started.add(const Duration(seconds: 5))),
-        started,
-      ),
-      isFalse,
-    );
-    expect(hasFreshOnlineReport(device('online', null), started), isFalse);
-    expect(
-      hasFreshOnlineReport(
-        device('online', started.add(const Duration(seconds: 5))),
-        started,
-      ),
-      isTrue,
-    );
+  test('only an online report for this pairing attempt confirms setup', () {
+    DeviceModel device(String status, String? attempt, {bool fix = false}) =>
+        DeviceModel.fromJson({
+          'id': trackerId,
+          'status': status,
+          'setup_nonce': attempt,
+          'last_seen': '2026-11-20T10:00:00Z',
+          'gps_fix': fix,
+        });
+    expect(hasFreshOnlineReport(device('online', null), nonce), isFalse);
+    expect(hasFreshOnlineReport(device('offline', nonce), nonce), isFalse);
+    final heartbeat = device('online', nonce);
+    expect(hasFreshOnlineReport(heartbeat, nonce), isTrue);
+    expect(heartbeat.gpsFix, isFalse);
+    expect(device('online', nonce, fix: true).gpsFix, isTrue);
   });
 }

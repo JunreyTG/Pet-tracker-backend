@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:pet_tracker_app/app/routes/app_pages.dart';
+import 'package:pet_tracker_app/app/routes/app_routes.dart';
+import 'package:pet_tracker_app/app/theme/app_preferences.dart';
 import 'package:pet_tracker_app/core/api/api_client.dart';
 import 'package:pet_tracker_app/core/services/notification_service.dart';
 import 'package:pet_tracker_app/data/models/models.dart';
 import 'package:pet_tracker_app/data/repositories/repositories.dart';
 import 'package:pet_tracker_app/features/alerts/views/alerts_screen.dart';
 import 'package:pet_tracker_app/features/auth/controllers/auth_controller.dart';
+import 'package:pet_tracker_app/features/auth/views/email_settings_screen.dart';
 import 'package:pet_tracker_app/features/auth/views/login_screen.dart';
 import 'package:pet_tracker_app/features/auth/views/register_screen.dart';
 import 'package:pet_tracker_app/features/devices/views/device_details_screen.dart';
@@ -21,8 +26,10 @@ import 'package:pet_tracker_app/features/pets/views/pet_details_screen.dart';
 import 'package:pet_tracker_app/features/pets/views/pet_form_screen.dart';
 import 'package:pet_tracker_app/features/pets/views/pets_screen.dart';
 import 'package:pet_tracker_app/features/profile/views/profile_screen.dart';
+import 'package:pet_tracker_app/features/profile/views/settings_screen.dart';
 import 'package:pet_tracker_app/features/tracking/controllers/tracking_controller.dart';
 import 'package:pet_tracker_app/features/tracking/views/tracking_screen.dart';
+import 'package:pet_tracker_app/main.dart';
 
 Map<String, dynamic> _deviceJson() => {
   'id': 'ESP32_002',
@@ -67,11 +74,26 @@ List<Map<String, dynamic>> _historyJson() => [
 ];
 
 class FakeApiClient extends ApiClient {
+  int alertsReads = 0;
+  int emailSends = 0;
+  bool emailVerified = false;
+  bool emailAlerts = false;
+
+  Map<String, dynamic> _emailUserJson() => {
+    'uid': 'owner',
+    'email': 'owner@example.com',
+    'display_name': 'Owner',
+    'email_verified': emailVerified,
+    'email_verification_required': false,
+    'email_alerts_enabled': emailAlerts,
+  };
+
   @override
   Future<dynamic> get(
     String path, {
     Map<String, String?> query = const {},
   }) async {
+    if (path == '/alerts') alertsReads++;
     if (path == '/devices/ESP32_002') return _deviceJson();
     if (path.contains('/location-history')) return _historyJson();
     if (path == '/places/countries') {
@@ -98,12 +120,40 @@ class FakeApiClient extends ApiClient {
   }
 
   @override
-  Future<dynamic> post(String path, {Object? body}) async =>
-      <String, dynamic>{};
+  Future<dynamic> post(String path, {Object? body}) async {
+    if (path == '/auth/email/send') {
+      emailSends++;
+      return <String, dynamic>{};
+    }
+    if (path == '/auth/email/verify') {
+      emailVerified = true;
+      return _emailUserJson();
+    }
+    return <String, dynamic>{};
+  }
 
   @override
-  Future<dynamic> patch(String path, {Object? body}) async =>
-      <String, dynamic>{};
+  Future<dynamic> patch(String path, {Object? body}) async {
+    if (path == '/auth/me') {
+      final changes = body is Map ? body : const {};
+      return {
+        'uid': 'owner',
+        'email': 'owner@example.com',
+        'display_name': changes['display_name'] ?? 'Owner',
+        'phone': changes['phone'],
+        'location': changes['location'],
+        'bio': changes['bio'],
+        'email_verified': false,
+        'email_verification_required': false,
+        'email_alerts_enabled': false,
+      };
+    }
+    if (path == '/auth/email/alerts') {
+      emailAlerts = (body as Map?)?['enabled'] == true;
+      return _emailUserJson();
+    }
+    return <String, dynamic>{};
+  }
 
   @override
   Future<dynamic> delete(String path) async => null;
@@ -244,7 +294,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.enterText(
         find.widgetWithText(TextField, 'Tracker code'),
-        'ESP32_123',
+        'PT-012345ABCDEF',
       );
       await tester.scrollUntilVisible(
         find.text('Find My Tracker'),
@@ -302,7 +352,7 @@ void main() {
     }
   });
 
-  testWidgets('tracking map renders with live device and history', (
+  testWidgets('History shows the recorded trail and centers it on the map', (
     tester,
   ) async {
     final data = Get.find<AppDataController>();
@@ -319,6 +369,17 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     c.focusSet.value = true;
     await tester.pump(const Duration(milliseconds: 500));
+    expect(c.history, isEmpty);
+    await tester.tap(find.text('History'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    final trail = tester.widget<PolylineLayer>(find.byType(PolylineLayer));
+    expect(trail.polylines.single.points.map((p) => p.latitude), [
+      5.01570,
+      5.01592,
+      5.01613,
+    ]);
+    expect(c.mapController.camera.center.latitude, closeTo(5.016, .01));
     expect(tester.takeException(), isNull);
     if (Get.isRegistered<TrackingController>()) {
       await Get.delete<TrackingController>(force: true);
@@ -339,4 +400,134 @@ void main() {
     await _pumpScreen(tester, const ProfileScreen());
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('Menu unread shortcut opens the inbox with the unread filter', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      GetMaterialApp(home: const ProfileScreen(), getPages: AppPages.pages),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Unread alerts'));
+    await tester.pumpAndSettle();
+    expect(find.text('You’re all caught up'), findsOneWidget);
+    final unread = tester.widget<ChoiceChip>(
+      find.widgetWithText(ChoiceChip, 'unread'),
+    );
+    expect(unread.selected, isTrue);
+  });
+
+  testWidgets('email settings verifies the address and toggles alerts', (
+    tester,
+  ) async {
+    final auth = Get.find<AuthController>();
+    final api = Get.find<ApiClient>() as FakeApiClient;
+    auth.backendUser.value = UserModel(
+      uid: 'owner',
+      email: 'owner@example.com',
+      displayName: 'Owner',
+    );
+    await _pumpScreen(tester, const EmailSettingsScreen());
+    expect(find.text('Email notifications'), findsOneWidget);
+    expect(find.text('Email not verified'), findsOneWidget);
+    await tester.tap(find.text('Send a code'));
+    await tester.pumpAndSettle();
+    expect(api.emailSends, 1);
+    expect(find.textContaining('Code sent'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '0123456789abcdef');
+    await tester.tap(find.text('Verify email'));
+    await tester.pumpAndSettle();
+    expect(auth.backendUser.value?.emailVerified, isTrue);
+    expect(
+      find.text('Email verified. You can now enable email alerts.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    expect(api.emailAlerts, isTrue);
+    expect(auth.backendUser.value?.emailAlertsEnabled, isTrue);
+    auth.backendUser.value = null;
+    await tester.pump();
+  });
+
+  testWidgets('profile form saves contact details', (tester) async {
+    final auth = Get.find<AuthController>();
+    auth.backendUser.value = UserModel(
+      uid: 'owner',
+      email: 'owner@example.com',
+      displayName: 'Owner',
+    );
+    await _pumpScreen(tester, const AccountProfileScreen());
+    final fields = find.byType(TextFormField);
+    await tester.enterText(fields.at(0), 'Owner Name');
+    await tester.enterText(fields.at(1), '0917 555 1234');
+    await tester.enterText(fields.at(2), 'Bongao, Tawi-Tawi');
+    await tester.enterText(fields.at(3), 'Dog dad and weekend hiker.');
+    await tester.scrollUntilVisible(
+      find.text('Save profile'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save profile'));
+    await tester.pumpAndSettle();
+    expect(auth.backendUser.value?.displayName, 'Owner Name');
+    expect(auth.backendUser.value?.phone, '0917 555 1234');
+    expect(auth.backendUser.value?.location, 'Bongao, Tawi-Tawi');
+    expect(auth.backendUser.value?.bio, 'Dog dad and weekend hiker.');
+    expect(find.text('Profile saved.'), findsOneWidget);
+    auth.backendUser.value = null;
+    await tester.pump();
+  });
+
+  testWidgets(
+    'selecting dark mode keeps Settings open and persists the choice',
+    (tester) async {
+      await AppPreferences.load();
+      await tester.pumpWidget(const PetTrackerApp());
+      await tester.pumpAndSettle();
+      Get.toNamed(Routes.settings);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<ThemeMode>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Dark').last);
+      await tester.pumpAndSettle();
+      final settings = tester.element(find.text('Appearance'));
+      expect(Theme.of(settings).brightness, Brightness.dark);
+      AppPreferences.themeMode.value = ThemeMode.system;
+      await AppPreferences.load();
+      expect(AppPreferences.themeMode.value, ThemeMode.dark);
+      await AppPreferences.setTheme(ThemeMode.system);
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'dashboard auto-refreshes while active, pauses, and refreshes on resume',
+    (tester) async {
+      await _pumpScreen(tester, const HomeScreen());
+      final auth = Get.find<AuthController>();
+      final api = Get.find<ApiClient>() as FakeApiClient;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      auth.backendUser.value = UserModel(
+        uid: 'owner',
+        email: 'owner@example.com',
+        displayName: 'Owner',
+      );
+      await tester.pump();
+      final initialReads = api.alertsReads;
+      expect(initialReads, greaterThan(0));
+      await tester.pump(const Duration(seconds: 30));
+      expect(api.alertsReads, greaterThan(initialReads));
+      final foregroundReads = api.alertsReads;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump(const Duration(seconds: 60));
+      expect(api.alertsReads, foregroundReads);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(api.alertsReads, greaterThan(foregroundReads));
+      auth.backendUser.value = null;
+      await tester.pump();
+    },
+  );
 }

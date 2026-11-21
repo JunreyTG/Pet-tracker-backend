@@ -18,23 +18,17 @@ class HomeScreen extends StatelessWidget {
     return AppScaffold(
       title: 'Pet Tracker',
       currentIndex: 0,
-      actions: [
-        IconButton.filledTonal(
-          onPressed: data.refreshAll,
-          icon: const Icon(Icons.refresh),
-        ),
-        const SizedBox(width: 12),
-      ],
       child: Obx(() {
         final pet = data.selectedPet.value;
         final device = pet == null ? null : data.deviceForPet(pet);
         return RefreshIndicator(
           onRefresh: data.refreshAll,
           child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
             children: [
               Text(
-                'Stay connected with\n${auth.backendUser.value?.displayName ?? 'your pet'}',
+                'Hello, ${auth.backendUser.value?.displayName ?? 'Pet Owner'}',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.w900,
                   height: 1.05,
@@ -59,18 +53,21 @@ class HomeScreen extends StatelessWidget {
                   Expanded(
                     child: _MetricCard(
                       icon: Icons.pets,
-                      label: 'Pets',
+                      label: 'My pets',
                       value: '${data.pets.length}',
                       color: AppTheme.green,
+                      onTap: () => Get.toNamed(Routes.pets),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: _MetricCard(
                       icon: Icons.notifications,
-                      label: 'Unread',
+                      label: 'Unread alerts',
                       value: '${data.unreadCount}',
                       color: AppTheme.orange,
+                      onTap: () =>
+                          Get.toNamed(Routes.alerts, arguments: 'unread'),
                     ),
                   ),
                 ],
@@ -143,7 +140,7 @@ class _PetHeroCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final online = deviceStatus == 'online';
     return Container(
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(32),
         gradient: const LinearGradient(
@@ -167,7 +164,7 @@ class _PetHeroCard extends StatelessWidget {
                 ),
                 child: PetAvatar(
                   photoUrl: photoUrl,
-                  size: 78,
+                  size: 58,
                   borderRadius: BorderRadius.circular(22),
                 ),
               ),
@@ -188,7 +185,7 @@ class _PetHeroCard extends StatelessWidget {
                     Text(
                       deviceStatus == null
                           ? 'No collar assigned'
-                          : '${online ? 'Connected' : deviceStatus} • ${battery?.toString() ?? '--'}%',
+                          : '${online ? 'Connected' : deviceStatus}${battery == null ? '' : ' • $battery%'}',
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: .78),
                       ),
@@ -198,7 +195,7 @@ class _PetHeroCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: onTrack,
             style: FilledButton.styleFrom(backgroundColor: AppTheme.orange),
@@ -217,28 +214,37 @@ class _MetricCard extends StatelessWidget {
     required this.label,
     required this.value,
     required this.color,
+    required this.onTap,
   });
   final IconData icon;
   final String label;
   final String value;
   final Color color;
+  final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => SectionCard(
-    margin: EdgeInsets.zero,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SoftIcon(icon: icon, color: color),
-        const SizedBox(height: 14),
-        Text(
-          value,
-          style: Theme.of(
-            context,
-          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+  Widget build(BuildContext context) => Card(
+    clipBehavior: Clip.antiAlias,
+    child: InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Icon(icon, size: 22, color: color),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(value, style: Theme.of(context).textTheme.titleLarge),
+                  Text(label, style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+          ],
         ),
-        Text(label),
-      ],
+      ),
     ),
   );
 }

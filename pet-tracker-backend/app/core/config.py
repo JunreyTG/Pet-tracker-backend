@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import EmailStr, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,7 +22,10 @@ class Settings(BaseSettings):
     auth_token_ttl_seconds: int = Field(default=60 * 60 * 24 * 7, gt=0)
     device_offline_threshold_seconds: int = Field(default=300, gt=0)
     device_heartbeat_check_interval_seconds: int = Field(default=60, gt=0)
+    device_offline_check_secret: str | None = Field(default=None, min_length=32)
     low_battery_threshold_percent: int = Field(default=20, ge=0, le=100)
+    brevo_api_key: SecretStr | None = None
+    alert_email_from: EmailStr | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

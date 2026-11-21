@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -8,7 +10,7 @@ import '../../../data/models/models.dart';
 import '../../../data/repositories/repositories.dart';
 import '../../auth/controllers/auth_controller.dart';
 
-class AppDataController extends GetxController {
+class AppDataController extends GetxController with WidgetsBindingObserver {
   AppDataController(
     this.petsRepo,
     this.devicesRepo,
@@ -34,6 +36,10 @@ class AppDataController extends GetxController {
   final loading = false.obs;
   final error = ''.obs;
   Worker? _authWorker;
+  Timer? _refreshTimer;
+  Future<void>? _refreshInProgress;
+  String? _sessionOwner;
+  int _sessionGeneration = 0;
   Future<void>? _mapFocusLoadFuture;
   String? _mapFocusLoadedForUser;
   static const _fallbackMapFocusPrefsKey = 'map_focus_current_device';
@@ -69,7 +75,7 @@ class AppDataController extends GetxController {
         );
         if (name != null && name.isNotEmpty) names[device.deviceId] = name;
       }
-      deviceNames.assignAll(names);
+      if (userId == _sessionOwner) deviceNames.assignAll(names);
     } catch (_) {}
   }
 
@@ -90,52 +96,121 @@ class AppDataController extends GetxController {
   void onInit() {
     super.onInit();
     final auth = Get.find<AuthController>();
-    _authWorker = ever(auth.backendUser, (user) async {
-      if (user == null) {
-        _clear();
+    WidgetsBinding.instance.addObserver(this);
+    void sessionChanged(UserModel? user) {
+      final eligibleOwner = user?.emailVerificationRequired == true
+          ? null
+          : user?.uid;
+      if (_sessionOwner == eligibleOwner) return;
+      _sessionOwner = eligibleOwner;
+      _sessionGeneration++;
+      _refreshInProgress = null;
+      _clear();
+      if (eligibleOwner == null) {
+        _refreshTimer?.cancel();
       } else {
-        await ensureMapFocusLoaded();
-        refreshAll();
+        unawaited(ensureMapFocusLoaded());
+        _startAutoRefresh();
       }
+    }
+
+    _authWorker = ever(auth.backendUser, sessionChanged);
+    sessionChanged(auth.backendUser.value);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _startAutoRefresh();
+    } else {
+      _refreshTimer?.cancel();
+    }
+  }
+
+  void _startAutoRefresh() {
+    _refreshTimer?.cancel();
+    final state = WidgetsBinding.instance.lifecycleState;
+    if (_sessionOwner == null ||
+        (state != null && state != AppLifecycleState.resumed)) {
+      return;
+    }
+    unawaited(refreshAll(silent: true));
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      unawaited(refreshAll(silent: true));
     });
   }
 
   @override
   void onClose() {
     _authWorker?.dispose();
+    _refreshTimer?.cancel();
+    _sessionGeneration++;
+    WidgetsBinding.instance.removeObserver(this);
     super.onClose();
   }
 
-  Future<void> refreshAll() async {
-    if (!Get.find<AuthController>().isAuthenticated) {
-      _clear();
-      return;
+  Future<void> refreshAll({bool silent = false}) async {
+    final session = _sessionGeneration;
+    if (_sessionOwner == null) return;
+    final pending = _refreshInProgress;
+    if (pending != null) {
+      await pending;
+      if (silent || session != _sessionGeneration) return;
+      final next = _refreshInProgress;
+      if (next != null) return next;
     }
-    if (loading.value) return;
+    if (_sessionOwner == null || session != _sessionGeneration) return;
+    final request = _refresh(session, silent);
+    _refreshInProgress = request;
+    try {
+      await request;
+    } finally {
+      if (identical(request, _refreshInProgress)) _refreshInProgress = null;
+    }
+  }
+
+  Future<void> _refresh(int session, bool silent) async {
     loading.value = true;
     error.value = '';
-    try {
-      final results = await Future.wait([
-        petsRepo.list(),
-        devicesRepo.list(),
-        geofencesRepo.list(),
-        alertsRepo.list(),
-      ]);
-      pets.assignAll(results[0] as List<PetModel>);
-      devices.assignAll(results[1] as List<DeviceModel>);
-      await _loadDeviceNames(results[1] as List<DeviceModel>);
-      geofences.assignAll(results[2] as List<GeofenceModel>);
-      alerts.assignAll(results[3] as List<AlertModel>);
-      if (pets.isNotEmpty &&
-          (selectedPet.value == null ||
-              !pets.any((p) => p.id == selectedPet.value!.id))) {
-        selectedPet.value = pets.first;
+    var failed = false;
+    Future<void> load<T>(
+      Future<List<T>> Function() fetch,
+      void Function(List<T>) apply,
+    ) async {
+      try {
+        final result = await fetch();
+        if (session == _sessionGeneration) apply(result);
+      } catch (e) {
+        failed = true;
+        if (session == _sessionGeneration) {
+          error.value = e is ApiException
+              ? e.message
+              : 'Could not refresh tracker data.';
+        }
       }
-    } on ApiException catch (e) {
-      error.value = e.message;
-      Get.snackbar('Backend', e.message);
+    }
+
+    try {
+      await Future.wait([
+        load(petsRepo.list, (result) {
+          final priorId = selectedPet.value?.id;
+          pets.assignAll(result);
+          selectedPet.value =
+              result.firstWhereOrNull((p) => p.id == priorId) ??
+              result.firstOrNull;
+        }),
+        load(devicesRepo.list, (result) {
+          devices.assignAll(result);
+          unawaited(_loadDeviceNames(result));
+        }),
+        load(geofencesRepo.list, geofences.assignAll),
+        load(alertsRepo.list, alerts.assignAll),
+      ]);
+      if (failed && !silent && session == _sessionGeneration) {
+        Get.snackbar('Backend', error.value);
+      }
     } finally {
-      loading.value = false;
+      if (session == _sessionGeneration) loading.value = false;
     }
   }
 
@@ -182,16 +257,10 @@ class AppDataController extends GetxController {
   }
 
   Future<void> _restoreSavedMapFocus(String storageKey) async {
-    String? restoredFromKey;
     try {
       final prefs = await SharedPreferences.getInstance();
-      var saved = prefs.getString(storageKey);
-      restoredFromKey = storageKey;
-      if ((saved == null || saved.isEmpty) &&
-          storageKey != _fallbackMapFocusPrefsKey) {
-        saved = prefs.getString(_fallbackMapFocusPrefsKey);
-        restoredFromKey = _fallbackMapFocusPrefsKey;
-      }
+      final saved = prefs.getString(storageKey);
+      if (storageKey != _currentMapFocusPrefsKey) return;
       if (saved == null || saved.isEmpty) return;
       final json = Map<String, dynamic>.from(jsonDecode(saved) as Map);
       mapFocusLocation.value = LocationModel.fromJson(
@@ -209,15 +278,14 @@ class AppDataController extends GetxController {
       mapFocusBarangay.value = PlaceOptionModel.fromJson(
         Map<String, dynamic>.from(json['barangay'] as Map),
       );
-      if (storageKey != restoredFromKey) {
-        await prefs.setString(storageKey, saved);
-      }
     } catch (_) {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(restoredFromKey ?? storageKey);
+      await prefs.remove(storageKey);
     } finally {
-      _mapFocusLoadedForUser = storageKey;
-      _mapFocusLoadFuture = null;
+      if (storageKey == _currentMapFocusPrefsKey) {
+        _mapFocusLoadedForUser = storageKey;
+        _mapFocusLoadFuture = null;
+      }
     }
   }
 

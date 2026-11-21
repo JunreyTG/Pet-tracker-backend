@@ -5,7 +5,7 @@
 > **Database:** Google Cloud Firestore (via Firebase Admin SDK)  
 > **Authentication:** Dual Scheme (Firebase ID Tokens for App, Salted PBKDF2 for Trackers)  
 > **Default API Base URL:** `http://127.0.0.1:8000`  
-> **API Version Prefix:** `/api/v1` (except `GET /health`)
+> **API Version Prefix:** `/api/v1`. The unversioned health routes are `/health` and `/ready`.
 
 ---
 
@@ -110,6 +110,10 @@ DEVICE_HEARTBEAT_CHECK_INTERVAL_SECONDS=60       # Interval between background c
 # Alerting Thresholds
 LOW_BATTERY_THRESHOLD_PERCENT=20                 # Low battery alert trigger (<= 20%)
 
+# Transactional Email (Brevo)
+BREVO_API_KEY="xkeysib-your-api-key"                 # Required for registration and email alerts
+ALERT_EMAIL_FROM="alerts@yourdomain.com"         # Bare verified sender address in Brevo
+
 # CORS Configuration
 CORS_ORIGINS=["http://localhost:5000","http://127.0.0.1:5000"]
 CORS_ORIGIN_REGEX="^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$"
@@ -158,8 +162,8 @@ The backend distinguishes strictly between human pet owners and automated IoT de
 ```
 
 1. **User Request Rules:**
-   - Client sends `Authorization: Bearer <Firebase ID Token>`.
-   - The backend validates the token using the Firebase Admin SDK with `check_revoked=True`.
+   - The client sends `Authorization: Bearer <access_token>` issued by FastAPI at login or registration.
+   - The backend validates the signed token and checks the account's current credential version in Firestore.
    - `owner_id` is always extracted from the token's `uid` claim on the server. Clients cannot provide or override `owner_id`.
    - Accessing a resource belonging to another user returns `404 Not Found` (rather than `403 Forbidden`) to avoid leaking document IDs.
    - Pydantic models use `extra="forbid"`. Any unexpected payload attributes return `422 Unprocessable Entity`.
@@ -167,7 +171,8 @@ The backend distinguishes strictly between human pet owners and automated IoT de
 2. **IoT Device Request Rules:**
    - ESP32 hardware collars submit telemetry to `POST /api/v1/device/telemetry`.
    - No Firebase ID Token is required.
-   - The request body contains `{device_id, device_secret, latitude, longitude, battery_level}`.
+   - GPS telemetry requires `device_id`, `device_secret`, `latitude`, and `longitude`. `battery_level` and `setup_nonce` are optional.
+   - `POST /api/v1/device/heartbeat` accepts the device credentials and optional `setup_nonce` without a GPS fix. It updates presence without writing a history point or evaluating geofences.
    - The secret is validated against the stored PBKDF2-SHA256 hash.
    - The device must be assigned to an active pet; otherwise, a `409 Conflict` is returned.
 
@@ -195,7 +200,8 @@ When `POST /api/v1/device/telemetry` is received:
 2. Confirm the tracker has an assigned `pet_id`.
 3. Update `devices/{device_id}`:
    - `status = "online"`
-   - `battery_level = payload.battery_level`
+   - Update `battery_level` only if measured and supplied.
+   - `gps_fix = true`; record the report's `setup_nonce` for setup verification.
    - `current_location = {latitude, longitude}`
    - `last_seen = SERVER_TIMESTAMP`
    - `last_location_update = SERVER_TIMESTAMP`
@@ -246,20 +252,52 @@ State transition matrix:
   }
   ```
 
+#### `GET /ready`
+- **Auth:** None. Returns `200` when the server can read Firestore and `503` otherwise. This probe does not write data.
+
 ---
 
 ### 6.2 Authentication
 #### `GET /api/v1/auth/me`
-- **Auth:** Bearer `<Firebase ID Token>`
-- **Description:** Syncs current Firebase user into the `users/{uid}` collection and returns profile info.
+- **Auth:** Bearer access token from `/api/v1/auth/login` or `/api/v1/auth/register`.
+- **Description:** Returns the current account profile stored in Firestore.
 - **Response `200`:**
   ```json
   {
     "uid": "FIREBASE_UID_123",
     "email": "owner@example.com",
-    "display_name": "Alex Smith"
+    "display_name": "Alex Smith",
+    "phone": "0917 555 1234",
+    "location": "Bongao, Tawi-Tawi",
+    "bio": "Dog dad and weekend hiker.",
+    "email_verified": true,
+    "email_verification_required": false,
+    "email_alerts_enabled": true
   }
   ```
+
+#### `PATCH /api/v1/auth/me`
+- **Body:** Any of `display_name` (1–120 characters), `phone` (up to 30), `location` (up to 120), or `bio` (up to 300). Send an empty string to clear an optional field. At least one field is required. Returns the updated profile. The sign-in email cannot be changed here.
+
+#### `POST /api/v1/auth/password`
+- **Body:** `current_password` and `new_password` (8–128 characters). Returns `204` after the credential change and invalidates earlier access tokens. An incorrect current password returns `400` without changing the session.
+
+#### `POST /api/v1/auth/email/send`
+- **Auth:** Bearer access token.
+- **Description:** Sends a 16-character verification code to the account email through Brevo. Codes expire after 15 minutes and are stored hashed. Resends are limited to one per minute and five per day (`429` when exceeded). Returns `204`. When email delivery is not configured, returns `503`.
+
+#### `POST /api/v1/auth/email/verify`
+- **Body:** `{"code": "0123456789ABCDEF"}` (case-insensitive).
+- **Description:** Confirms the email address and clears the verification-required gate. Returns the updated user profile. Invalid, expired, or already-used codes return `400`.
+
+#### `PATCH /api/v1/auth/email/alerts`
+- **Body:** `{"enabled": true}`.
+- **Description:** Opts the verified account in or out of email alerts. Enabling before verification returns `409`. Returns the updated user profile.
+
+#### Registration and verification gate
+- `POST /api/v1/auth/register` returns `201` with a token and `email_verification_required: true`; the client then calls `/api/v1/auth/email/send` to deliver a code. When Brevo is not configured, registration returns `503`.
+- While verification is required, `/api/v1/auth/me` remains available but all other owner endpoints return `403` with a verification message.
+- `CurrentUserResponse` includes `email_verified`, `email_verification_required`, and `email_alerts_enabled`.
 
 ---
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.schemas.telemetry import DeviceTelemetryRequest, DeviceTelemetryResponse
+from app.schemas.telemetry import DeviceHeartbeatRequest, DeviceTelemetryRequest, DeviceTelemetryResponse
 from app.services.device_service import DeviceAuthenticationError
 from app.services.telemetry_service import DeviceNotAssignedError, TelemetryService, TelemetryServiceError, get_telemetry_service
 
@@ -27,8 +27,23 @@ def receive_device_telemetry(
     data: DeviceTelemetryRequest,
     telemetry_service: TelemetryService = Depends(get_telemetry_service),
 ) -> DeviceTelemetryResponse:
+    _accept_report(telemetry_service.receive_telemetry, data)
+    return DeviceTelemetryResponse(message="Telemetry received successfully")
+
+
+@router.post("/heartbeat", response_model=DeviceTelemetryResponse)
+def receive_device_heartbeat(
+    data: DeviceHeartbeatRequest,
+    telemetry_service: TelemetryService = Depends(get_telemetry_service),
+) -> DeviceTelemetryResponse:
+    """Report that an assigned tracker is online without a usable GPS fix."""
+    _accept_report(telemetry_service.receive_heartbeat, data)
+    return DeviceTelemetryResponse(message="Heartbeat received successfully")
+
+
+def _accept_report(receive, data: DeviceHeartbeatRequest) -> None:
     try:
-        telemetry_service.receive_telemetry(data)
+        receive(data)
     except DeviceAuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -44,5 +59,3 @@ def receive_device_telemetry(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Telemetry service is not available.",
         ) from exc
-
-    return DeviceTelemetryResponse(message="Telemetry received successfully")

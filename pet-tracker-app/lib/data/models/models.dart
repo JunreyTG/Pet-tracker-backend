@@ -3,20 +3,50 @@ class UserModel {
     required this.uid,
     required this.email,
     required this.displayName,
+    this.phone,
+    this.location,
+    this.bio,
+    this.emailVerified = false,
+    this.emailVerificationRequired = false,
+    this.emailAlertsEnabled = false,
   });
   final String uid;
   final String email;
   final String displayName;
+  final String? phone;
+  final String? location;
+  final String? bio;
+  final bool emailVerified;
+  final bool emailVerificationRequired;
+  final bool emailAlertsEnabled;
   factory UserModel.fromJson(Map<String, dynamic> json) => UserModel(
     uid: json['uid'] ?? '',
     email: json['email'] ?? '',
     displayName: json['display_name'] ?? 'Pet Owner',
+    phone: parseTextOrNull(json['phone']),
+    location: parseTextOrNull(json['location']),
+    bio: parseTextOrNull(json['bio']),
+    emailVerified: json['email_verified'] == true,
+    emailVerificationRequired: json['email_verification_required'] == true,
+    emailAlertsEnabled: json['email_alerts_enabled'] == true,
   );
   Map<String, dynamic> toJson() => {
     'uid': uid,
     'email': email,
     'display_name': displayName,
+    'phone': phone,
+    'location': location,
+    'bio': bio,
+    'email_verified': emailVerified,
+    'email_verification_required': emailVerificationRequired,
+    'email_alerts_enabled': emailAlertsEnabled,
   };
+}
+
+String? parseTextOrNull(dynamic value) {
+  if (value is! String) return null;
+  final text = value.trim();
+  return text.isEmpty ? null : text;
 }
 
 DateTime? parseDate(dynamic value) =>
@@ -151,6 +181,8 @@ class DeviceModel {
     this.currentLocation,
     this.lastSeen,
     this.lastLocationUpdate,
+    this.setupNonce,
+    this.gpsFix,
     required this.lowBatteryAlertActive,
     this.deviceSecret,
   });
@@ -162,6 +194,8 @@ class DeviceModel {
   final LocationModel? currentLocation;
   final DateTime? lastSeen;
   final DateTime? lastLocationUpdate;
+  final String? setupNonce;
+  final bool? gpsFix;
   final bool lowBatteryAlertActive;
   final String? deviceSecret;
   bool get hasLocation => currentLocation != null;
@@ -174,6 +208,8 @@ class DeviceModel {
     currentLocation: parseLocationOrNull(json['current_location']),
     lastSeen: parseDate(json['last_seen']),
     lastLocationUpdate: parseDate(json['last_location_update']),
+    setupNonce: json['setup_nonce']?.toString(),
+    gpsFix: json['gps_fix'] is bool ? json['gps_fix'] as bool : null,
     lowBatteryAlertActive: json['low_battery_alert_active'] is bool
         ? json['low_battery_alert_active'] as bool
         : false,

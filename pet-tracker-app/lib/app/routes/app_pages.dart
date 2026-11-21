@@ -2,6 +2,7 @@ import 'package:get/get.dart';
 
 import '../../features/alerts/views/alerts_screen.dart';
 import '../../features/auth/views/login_screen.dart';
+import '../../features/auth/views/email_settings_screen.dart';
 import '../../features/auth/views/register_screen.dart';
 import '../../features/devices/views/device_details_screen.dart';
 import '../../features/devices/views/device_wifi_setup_screen.dart';
@@ -13,6 +14,7 @@ import '../../features/pets/views/pet_form_screen.dart';
 import '../../features/pets/views/pet_details_screen.dart';
 import '../../features/pets/views/pets_screen.dart';
 import '../../features/profile/views/profile_screen.dart';
+import '../../features/profile/views/settings_screen.dart';
 import '../../features/tracking/views/map_focus_screen.dart';
 import '../../features/tracking/views/tracking_screen.dart';
 import 'app_routes.dart';
@@ -40,11 +42,21 @@ class AppPages {
     GetPage(name: Routes.tracking, page: () => const TrackingScreen()),
     GetPage(name: Routes.mapFocus, page: () => const MapFocusScreen()),
     GetPage(name: Routes.geofences, page: () => const GeofencesScreen()),
-    GetPage(
-      name: Routes.geofenceForm,
-      page: () => const GeofenceFormScreen(),
-    ),
+    GetPage(name: Routes.geofenceForm, page: () => const GeofenceFormScreen()),
     GetPage(name: Routes.alerts, page: () => const AlertsScreen()),
     GetPage(name: Routes.profile, page: () => const ProfileScreen()),
+    GetPage(name: Routes.settings, page: () => const SettingsScreen()),
+    GetPage(
+      name: Routes.emailSettings,
+      page: () => EmailSettingsScreen(sendOnOpen: Get.arguments == true),
+    ),
+    GetPage(
+      name: Routes.accountProfile,
+      page: () => const AccountProfileScreen(),
+    ),
+    GetPage(
+      name: Routes.changePassword,
+      page: () => const ChangePasswordScreen(),
+    ),
   ];
 }

@@ -14,21 +14,14 @@ class AlertsScreen extends StatefulWidget {
 }
 
 class _AlertsScreenState extends State<AlertsScreen> {
-  String filter = 'all';
+  late String filter = Get.arguments == 'unread' ? 'unread' : 'all';
 
   @override
   Widget build(BuildContext context) {
     final data = Get.find<AppDataController>();
     return AppScaffold(
-      title: 'Activity status',
+      title: 'Alerts',
       currentIndex: 3,
-      actions: [
-        IconButton.filledTonal(
-          onPressed: data.refreshAll,
-          icon: const Icon(Icons.refresh),
-        ),
-        const SizedBox(width: 12),
-      ],
       child: Obx(() {
         final items = data.alerts
             .where(
@@ -39,13 +32,6 @@ class _AlertsScreenState extends State<AlertsScreen> {
                   a.type == filter,
             )
             .toList();
-        if (items.isEmpty) {
-          return EmptyState(
-            icon: Icons.notifications_none,
-            title: 'No alerts',
-            message: 'Tracker events and safe-zone alerts appear here.',
-          );
-        }
         return Column(
           children: [
             SingleChildScrollView(
@@ -84,79 +70,101 @@ class _AlertsScreenState extends State<AlertsScreen> {
               ),
             ),
             Expanded(
-              child: RefreshIndicator(
-                onRefresh: data.refreshAll,
-                child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
-                  itemCount: items.length,
-                  itemBuilder: (_, i) {
-                    final a = items[i];
-                    return Dismissible(
-                      key: ValueKey(a.id),
-                      background: Container(
-                        alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppTheme.orange,
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: const Icon(Icons.delete, color: Colors.white),
-                      ),
-                      onDismissed: (_) async {
-                        await data.alertsRepo.delete(a.id);
-                        await data.refreshAll();
-                      },
-                      child: SectionCard(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        child: Row(
-                          children: [
-                            SoftIcon(
-                              icon: _icon(a.type),
-                              color: a.read ? Colors.grey : AppTheme.green,
+              child: items.isEmpty
+                  ? EmptyState(
+                      icon: Icons.notifications_none,
+                      title: filter == 'unread'
+                          ? 'You’re all caught up'
+                          : 'No matching alerts',
+                      message: filter == 'all'
+                          ? 'Tracker events and safe-zone alerts appear here.'
+                          : 'Select another filter to see more alerts.',
+                    )
+                  : RefreshIndicator(
+                      onRefresh: data.refreshAll,
+                      child: ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
+                        itemCount: items.length,
+                        itemBuilder: (_, i) {
+                          final a = items[i];
+                          return Dismissible(
+                            key: ValueKey(a.id),
+                            background: Container(
+                              alignment: Alignment.centerRight,
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: AppTheme.orange,
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              child: const Icon(
+                                Icons.delete,
+                                color: Colors.white,
+                              ),
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                            onDismissed: (_) async {
+                              await data.alertsRepo.delete(a.id);
+                              await data.refreshAll();
+                            },
+                            child: SectionCard(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              child: Row(
                                 children: [
-                                  Text(
-                                    a.title,
-                                    style: TextStyle(
-                                      fontWeight: a.read
-                                          ? FontWeight.w700
-                                          : FontWeight.w900,
+                                  SoftIcon(
+                                    icon: _icon(a.type),
+                                    color: a.read
+                                        ? Colors.grey
+                                        : AppTheme.green,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          a.title,
+                                          style: TextStyle(
+                                            fontWeight: a.read
+                                                ? FontWeight.w700
+                                                : FontWeight.w900,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(a.message),
+                                        if (a.createdAt != null)
+                                          Text(
+                                            DateFormat.yMMMd().add_jm().format(
+                                              a.createdAt!,
+                                            ),
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.bodySmall,
+                                          ),
+                                      ],
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(a.message),
-                                  if (a.createdAt != null)
-                                    Text(
-                                      DateFormat.yMMMd().add_jm().format(
-                                        a.createdAt!,
-                                      ),
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodySmall,
+                                  IconButton(
+                                    icon: Icon(
+                                      a.read
+                                          ? Icons.mark_email_unread
+                                          : Icons.done,
                                     ),
+                                    onPressed: () async {
+                                      await data.alertsRepo.updateRead(
+                                        a.id,
+                                        !a.read,
+                                      );
+                                      await data.refreshAll();
+                                    },
+                                  ),
                                 ],
                               ),
                             ),
-                            IconButton(
-                              icon: Icon(
-                                a.read ? Icons.mark_email_unread : Icons.done,
-                              ),
-                              onPressed: () async {
-                                await data.alertsRepo.updateRead(a.id, !a.read);
-                                await data.refreshAll();
-                              },
-                            ),
-                          ],
-                        ),
+                          );
+                        },
                       ),
-                    );
-                  },
-                ),
-              ),
+                    ),
             ),
           ],
         );

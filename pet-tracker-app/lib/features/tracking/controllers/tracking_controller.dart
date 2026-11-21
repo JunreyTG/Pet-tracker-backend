@@ -1,9 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:get/get.dart';
-import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import '../../../app/routes/app_routes.dart';
@@ -11,7 +10,7 @@ import '../../../data/models/models.dart';
 import '../../../data/repositories/repositories.dart';
 import '../../home/controllers/app_data_controller.dart';
 
-class TrackingController extends GetxController {
+class TrackingController extends GetxController with WidgetsBindingObserver {
   final data = Get.find<AppDataController>();
   final placesRepo = Get.find<PlaceRepository>();
   final mapController = MapController();
@@ -34,20 +33,30 @@ class TrackingController extends GetxController {
   final focusLoading = false.obs;
   final focusError = ''.obs;
   final focusCenter = Rxn<LatLng>();
-  final roadRoute = <LatLng>[].obs;
-  final routeLoading = false.obs;
-  final routeError = ''.obs;
+  final historyLoading = false.obs;
+  final historyError = ''.obs;
   Timer? _timer;
-  String? _lastRouteSignature;
-
-  String? get deviceId => Get.arguments is String
+  bool mapReady = false;
+  bool _livePending = false;
+  int _historyGeneration = 0;
+  final String? _requestedDevice = Get.arguments is String
       ? Get.arguments as String
-      : data.selectedPet.value?.deviceId;
-  PetModel? get pet => device.value?.petId == null
-      ? data.selectedPet.value
-      : data.pets.firstWhereOrNull((p) => p.id == device.value?.petId);
+      : null;
+
+  String? get deviceId => _requestedDevice ?? data.selectedPet.value?.deviceId;
+  DeviceModel? get currentDevice =>
+      device.value?.deviceId == deviceId ? device.value : null;
+  String? get _petId {
+    final collar = currentDevice;
+    if (collar != null) return collar.petId;
+    return _requestedDevice == null ? data.selectedPet.value?.id : null;
+  }
+
+  PetModel? get pet =>
+      data.pets.firstWhereOrNull((p) => p.id == _petId) ??
+      (data.selectedPet.value?.id == _petId ? data.selectedPet.value : null);
   LatLng? get liveLatLng {
-    final loc = device.value?.currentLocation;
+    final loc = currentDevice?.currentLocation;
     return loc == null ? null : LatLng(loc.latitude, loc.longitude);
   }
 
@@ -58,19 +67,26 @@ class TrackingController extends GetxController {
     selectedCountry.value?.name,
   ].whereType<String>().where((part) => part.isNotEmpty).join(', ');
 
-  List<LatLng> get trackPoints {
-    final points = history.map((h) => LatLng(h.latitude, h.longitude)).toList();
-    final live = liveLatLng;
-    if (live != null && (points.isEmpty || !_samePoint(points.last, live))) {
-      points.add(live);
-    }
-    return _uniquePoints(points);
-  }
+  List<LatLng> get trackPoints => _uniquePoints(
+    history
+        .where((h) => h.petId == _petId)
+        .map((h) => LatLng(h.latitude, h.longitude)),
+  );
 
   @override
   void onInit() {
     super.onInit();
+    WidgetsBinding.instance.addObserver(this);
     _initialize();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      startLivePolling();
+    } else {
+      _timer?.cancel();
+    }
   }
 
   Future<void> _initialize() async {
@@ -81,8 +97,10 @@ class TrackingController extends GetxController {
     } finally {
       focusLoading.value = false;
     }
-    await loadCountries();
-    startLivePolling();
+    if (!isClosed) {
+      startLivePolling();
+      await loadCountries();
+    }
   }
 
   void _restoreSavedFocus() {
@@ -193,52 +211,88 @@ class TrackingController extends GetxController {
 
   void startLivePolling() {
     _timer?.cancel();
+    final state = WidgetsBinding.instance.lifecycleState;
+    if (state != null && state != AppLifecycleState.resumed) return;
     fetchLive();
     _timer = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (mode.value == 'live') fetchLive(silent: true);
+      final route = Get.currentRoute;
+      if (mode.value == 'live' &&
+          (route == Routes.tracking || route.isEmpty || route == '/')) {
+        fetchLive(silent: true);
+      }
     });
   }
 
   Future<void> fetchLive({bool silent = false}) async {
     final id = deviceId;
-    if (id == null || id.isEmpty) return;
+    if (id == null || id.isEmpty || _livePending || mode.value != 'live') {
+      return;
+    }
+    _livePending = true;
     if (!silent) loading.value = true;
     error.value = '';
     try {
-      device.value = await data.devicesRepo.get(id);
-      await _loadRecentHistoryForRoute();
-      await refreshRoadRoute();
+      final collar = await data.devicesRepo.get(id);
+      if (!isClosed && id == deviceId) device.value = collar;
     } catch (e) {
-      error.value = e.toString();
+      if (!isClosed && id == deviceId) error.value = e.toString();
     } finally {
-      loading.value = false;
+      _livePending = false;
+      if (!isClosed) loading.value = false;
     }
   }
 
   Future<void> loadHistory({int hours = 24}) async {
-    final p = pet;
-    if (p == null) return;
     mode.value = 'history';
-    loading.value = true;
-    error.value = '';
+    final id = deviceId;
+    final generation = ++_historyGeneration;
+    history.clear();
+    historyLoading.value = true;
+    historyError.value = '';
+    bool stillCurrent() =>
+        !isClosed &&
+        generation == _historyGeneration &&
+        id == deviceId &&
+        mode.value == 'history';
     try {
-      history.assignAll(
-        await data.petsRepo.history(
-          p.id,
-          limit: 200,
-          start: DateTime.now().subtract(Duration(hours: hours)),
-        ),
+      if (_petId == null && id != null && currentDevice == null) {
+        final collar = await data.devicesRepo.get(id);
+        if (!stillCurrent()) return;
+        device.value = collar;
+      }
+      final petId = _petId;
+      if (petId == null) {
+        historyError.value = 'Assign this tracker to a pet to see its trail.';
+        return;
+      }
+      final now = DateTime.now();
+      final points = await data.petsRepo.history(
+        petId,
+        limit: 200,
+        start: now.subtract(Duration(hours: hours)),
+        end: now,
       );
-      await refreshRoadRoute();
-    } catch (e) {
-      error.value = e.toString();
+      if (!stillCurrent() || petId != _petId) return;
+      history.assignAll(points);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (stillCurrent()) fitHistory();
+      });
+    } catch (_) {
+      if (stillCurrent()) {
+        historyError.value = 'Could not load the pet’s trail.';
+      }
     } finally {
-      loading.value = false;
+      if (!isClosed && generation == _historyGeneration) {
+        historyLoading.value = false;
+      }
     }
   }
 
   void showLive() {
+    _historyGeneration++;
+    historyLoading.value = false;
     mode.value = 'live';
+    recenter();
     fetchLive();
   }
 
@@ -295,107 +349,36 @@ class TrackingController extends GetxController {
     }
   }
 
-  Future<void> refreshRoadRoute() async {
-    final waypoints = _routeWaypoints(trackPoints);
-    if (waypoints.length < 2) {
-      roadRoute.clear();
-      routeError.value = '';
-      _lastRouteSignature = null;
-      return;
-    }
-
-    final signature = waypoints
-        .map(
-          (p) =>
-              '${p.latitude.toStringAsFixed(6)},${p.longitude.toStringAsFixed(6)}',
-        )
-        .join('|');
-    if (signature == _lastRouteSignature) return;
-
-    _lastRouteSignature = signature;
-    routeLoading.value = true;
-    routeError.value = '';
-    try {
-      final coordinates = waypoints
-          .map((p) => '${p.longitude},${p.latitude}')
-          .join(';');
-      final uri = Uri.parse(
-        'https://router.project-osrm.org/route/v1/driving/$coordinates?overview=full&geometries=geojson',
+  void fitHistory() {
+    if (!mapReady) return;
+    final points = trackPoints;
+    if (points.length == 1) {
+      mapController.move(points.single, 16);
+    } else if (points.length > 1) {
+      final height = mapController.camera.nonRotatedSize.height;
+      final topPadding = (height * .32).clamp(32.0, 200.0).toDouble();
+      final bottomPadding = (height * .24).clamp(24.0, 130.0).toDouble();
+      mapController.fitCamera(
+        CameraFit.bounds(
+          bounds: LatLngBounds.fromPoints(points),
+          maxZoom: 17,
+          padding: EdgeInsets.fromLTRB(30, topPadding, 62, bottomPadding),
+        ),
       );
-      final response = await http.get(uri).timeout(const Duration(seconds: 20));
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception('Road route is unavailable.');
-      }
-      final decodedBody = jsonDecode(response.body);
-      if (decodedBody is! Map) {
-        throw Exception('Road route is unavailable.');
-      }
-      final decoded = Map<String, dynamic>.from(decodedBody);
-      final routes = decoded['routes'];
-      if (routes is! List || routes.isEmpty) {
-        throw Exception('Road route is unavailable.');
-      }
-      final route = routes.first;
-      if (route is! Map) {
-        throw Exception('Road route is unavailable.');
-      }
-      final routeMap = Map<String, dynamic>.from(route);
-      final geometry = routeMap['geometry'];
-      if (geometry is! Map) {
-        throw Exception('Road route is unavailable.');
-      }
-      final coords = Map<String, dynamic>.from(geometry)['coordinates'];
-      if (coords is! List) {
-        throw Exception('Road route is unavailable.');
-      }
-      final points = <LatLng>[];
-      for (final coord in coords) {
-        if (coord is! List || coord.length < 2) continue;
-        final lon = coord[0];
-        final lat = coord[1];
-        if (lon is! num || lat is! num) continue;
-        points.add(LatLng(lat.toDouble(), lon.toDouble()));
-      }
-      if (points.length < 2) {
-        throw Exception('Road route is unavailable.');
-      }
-      roadRoute.assignAll(points);
-    } catch (_) {
-      roadRoute.clear();
-      routeError.value = 'Road route unavailable; showing direct track.';
-    } finally {
-      routeLoading.value = false;
     }
   }
 
   void recenter() {
-    final point =
-        liveLatLng ??
-        focusCenter.value ??
-        (history.isNotEmpty
-            ? LatLng(history.last.latitude, history.last.longitude)
-            : null);
+    if (!mapReady) return;
+    if (mode.value == 'history' && trackPoints.isNotEmpty) {
+      fitHistory();
+      return;
+    }
+    final point = liveLatLng ?? focusCenter.value;
     if (point != null) mapController.move(point, 16);
   }
 
-  Future<void> _loadRecentHistoryForRoute() async {
-    final p = pet;
-    if (p == null) return;
-    history.assignAll(
-      await data.petsRepo.history(
-        p.id,
-        limit: 100,
-        start: DateTime.now().subtract(const Duration(hours: 24)),
-      ),
-    );
-  }
-
-  List<LatLng> _routeWaypoints(List<LatLng> points) {
-    if (points.length <= 25) return points;
-    return points.sublist(points.length - 25);
-  }
-
-  List<LatLng> _uniquePoints(List<LatLng> points) {
+  List<LatLng> _uniquePoints(Iterable<LatLng> points) {
     final unique = <LatLng>[];
     for (final point in points) {
       if (unique.isEmpty || !_samePoint(unique.last, point)) unique.add(point);
@@ -418,6 +401,7 @@ class TrackingController extends GetxController {
   @override
   void onClose() {
     _timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     super.onClose();
   }
 }

@@ -254,6 +254,16 @@ def test_authenticated_user_can_create_device_provisioning(fake_device_api_servi
     assert "device_secret_hash" not in body
 
 
+def test_c3_provisioning_returns_matching_hotspot(fake_device_api_service: FakeDeviceApiService) -> None:
+    payload = {"device_id": "PT-012345ABCDEF", "backend_url": "https://backend.example"}
+    response = client.post("/api/v1/devices/setup", json=payload)
+    assert response.status_code == 201
+    assert response.json()["setup_hotspot_ssid"] == "PetTracker-ABCDEF"
+    assert response.json()["setup_url"] == "http://192.168.4.1/config"
+    response = client.post("/api/v1/devices/setup", json={**payload, "backend_url": "http://backend.example"})
+    assert response.status_code == 422
+
+
 def test_duplicate_device_provisioning_returns_409(fake_device_api_service: FakeDeviceApiService) -> None:
     response = client.post("/api/v1/devices/setup", json={"device_id": "duplicate-device"})
 

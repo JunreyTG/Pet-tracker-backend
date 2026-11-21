@@ -39,10 +39,14 @@ class TrackingScreen extends StatelessWidget {
         if (!c.focusSet.value) {
           return _MapFocusPrompt(controller: c);
         }
-        if (c.loading.value && c.device.value == null) {
+        if (c.mode.value == 'live' &&
+            c.loading.value &&
+            c.currentDevice == null) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (c.error.value.isNotEmpty && c.device.value == null) {
+        if (c.mode.value == 'live' &&
+            c.error.value.isNotEmpty &&
+            c.currentDevice == null) {
           return EmptyState(
             icon: Icons.cloud_off,
             title: 'Backend error',
@@ -70,7 +74,14 @@ class TrackingScreen extends StatelessWidget {
           children: [
             FlutterMap(
               mapController: c.mapController,
-              options: MapOptions(initialCenter: center, initialZoom: 16),
+              options: MapOptions(
+                initialCenter: center,
+                initialZoom: 16,
+                onMapReady: () {
+                  c.mapReady = true;
+                  if (c.mode.value == 'history') c.fitHistory();
+                },
+              ),
               children: [
                 TileLayer(
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -116,7 +127,7 @@ class TrackingScreen extends StatelessWidget {
                         size: 34,
                       ),
                     ),
-                    if (live != null)
+                    if (live != null && c.mode.value == 'live')
                       Marker(
                         point: live,
                         width: 130,
@@ -125,7 +136,7 @@ class TrackingScreen extends StatelessWidget {
                           live: live,
                           petName: c.pet?.name ?? 'Pet',
                           photoUrl: c.pet?.photoUrl,
-                          lastUpdate: c.device.value?.lastLocationUpdate,
+                          lastUpdate: c.currentDevice?.lastLocationUpdate,
                         ),
                       ),
                   ],
@@ -214,12 +225,11 @@ class TrackingScreen extends StatelessWidget {
       final pt = points[i];
       final isStart = i == 0;
       final isEnd = i == points.length - 1;
-      if (isEnd) continue;
       markers.add(
         Marker(
           point: pt,
-          width: isStart ? 38 : 26,
-          height: isStart ? 38 : 26,
+          width: isStart || isEnd ? 38 : 26,
+          height: isStart || isEnd ? 38 : 26,
           child: Container(
             decoration: BoxDecoration(
               color: isStart ? const Color(0xFF2563EB) : AppTheme.orange,
@@ -234,7 +244,11 @@ class TrackingScreen extends StatelessWidget {
               ],
             ),
             child: Center(
-              child: isStart
+              child: points.length == 1
+                  ? const Icon(Icons.place, color: Colors.white, size: 18)
+                  : isEnd
+                  ? const Icon(Icons.flag_circle, color: Colors.white, size: 18)
+                  : isStart
                   ? const Icon(Icons.flag, color: Colors.white, size: 18)
                   : Text(
                       '${i + 1}',
@@ -271,10 +285,7 @@ class TrackingScreen extends StatelessWidget {
 }
 
 class _CollapsiblePetCard extends StatefulWidget {
-  const _CollapsiblePetCard({
-    required this.controller,
-    required this.live,
-  });
+  const _CollapsiblePetCard({required this.controller, required this.live});
 
   final TrackingController controller;
   final LatLng? live;
@@ -289,8 +300,8 @@ class _CollapsiblePetCardState extends State<_CollapsiblePetCard> {
   @override
   Widget build(BuildContext context) {
     final c = widget.controller;
-    final isOnline = c.device.value?.status == 'online';
-    final battery = c.device.value?.batteryLevel?.toString() ?? '--';
+    final isOnline = c.currentDevice?.status == 'online';
+    final battery = c.currentDevice?.batteryLevel;
     final petName = c.pet?.name ?? 'Pet';
 
     return Container(
@@ -325,10 +336,7 @@ class _CollapsiblePetCardState extends State<_CollapsiblePetCard> {
               Container(
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(
-                    color: AppTheme.green,
-                    width: 2,
-                  ),
+                  border: Border.all(color: AppTheme.green, width: 2),
                 ),
                 child: PetAvatar(
                   photoUrl: c.pet?.photoUrl,
@@ -346,7 +354,8 @@ class _CollapsiblePetCardState extends State<_CollapsiblePetCard> {
                         petName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
                               fontWeight: FontWeight.w900,
                               fontSize: _minimized ? 14 : 16,
                             ),
@@ -363,11 +372,11 @@ class _CollapsiblePetCardState extends State<_CollapsiblePetCard> {
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      '$battery%',
+                      battery == null ? '' : '$battery%',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 11,
-                          ),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 11,
+                      ),
                     ),
                   ],
                 ),
@@ -382,8 +391,14 @@ class _CollapsiblePetCardState extends State<_CollapsiblePetCard> {
                   visualDensity: VisualDensity.compact,
                 ),
                 segments: const [
-                  ButtonSegment(value: 'live', label: Text('Live', style: TextStyle(fontSize: 12))),
-                  ButtonSegment(value: 'history', label: Text('History', style: TextStyle(fontSize: 12))),
+                  ButtonSegment(
+                    value: 'live',
+                    label: Text('Live', style: TextStyle(fontSize: 12)),
+                  ),
+                  ButtonSegment(
+                    value: 'history',
+                    label: Text('History', style: TextStyle(fontSize: 12)),
+                  ),
                 ],
                 selected: {c.mode.value},
                 onSelectionChanged: (s) {
@@ -403,7 +418,9 @@ class _CollapsiblePetCardState extends State<_CollapsiblePetCard> {
                 child: Padding(
                   padding: const EdgeInsets.all(4),
                   child: Icon(
-                    _minimized ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
+                    _minimized
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_up,
                     size: 24,
                     color: AppTheme.green,
                   ),
@@ -428,7 +445,10 @@ class _CollapsiblePetCardState extends State<_CollapsiblePetCard> {
                 TextButton.icon(
                   onPressed: () => Get.toNamed(Routes.mapFocus),
                   icon: const Icon(Icons.edit_location_alt, size: 16),
-                  label: const Text('Edit Focus', style: TextStyle(fontSize: 12)),
+                  label: const Text(
+                    'Edit Focus',
+                    style: TextStyle(fontSize: 12),
+                  ),
                   style: TextButton.styleFrom(
                     visualDensity: VisualDensity.compact,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -436,22 +456,46 @@ class _CollapsiblePetCardState extends State<_CollapsiblePetCard> {
                 ),
               ],
             ),
-            if (widget.live == null)
+            if (c.mode.value == 'live' &&
+                (widget.live == null || c.currentDevice?.gpsFix == false))
               Text(
-                c.device.value?.status == 'offline'
-                    ? 'Tracker is offline. Showing saved focus area.'
-                    : 'Awaiting GPS fix. Showing focus area.',
+                c.currentDevice?.status == 'offline'
+                    ? 'Tracker is offline.'
+                    : 'Waiting for GPS${widget.live == null ? '.' : ' — showing last known location.'}',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppTheme.orange,
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
-            if (c.mode.value == 'history')
-              Text(
-                c.history.isEmpty ? 'No recent history.' : '${c.history.length} location waypoints recorded',
-                style: Theme.of(context).textTheme.bodySmall,
+                  color: AppTheme.orange,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
           ],
+          if (c.mode.value == 'history')
+            Obx(() {
+              final count = c.trackPoints.length;
+              final error = c.historyError.value;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 6),
+                  Text(
+                    c.historyLoading.value
+                        ? 'Loading the pet’s trail…'
+                        : error.isNotEmpty
+                        ? error
+                        : count == 0
+                        ? 'No GPS points recorded in the last 24 hours.'
+                        : count == 1
+                        ? 'One recorded location in the last 24 hours.'
+                        : '$count trail points in the last 24 hours.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  if (error.isNotEmpty)
+                    TextButton(
+                      onPressed: c.loadHistory,
+                      child: const Text('Retry history'),
+                    ),
+                ],
+              );
+            }),
         ],
       ),
     );
@@ -493,8 +537,8 @@ class _MapFocusPrompt extends StatelessWidget {
                   Text(
                     'Setup Focus Map',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w900,
-                        ),
+                      fontWeight: FontWeight.w900,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
@@ -511,7 +555,9 @@ class _MapFocusPrompt extends StatelessWidget {
                       style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.green,
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
                       ),
                       icon: const Icon(Icons.map),
                       label: const Text(
@@ -561,11 +607,17 @@ class _JumpingPetMarkerState extends State<_JumpingPetMarker>
     );
     _jumpAnimation = TweenSequence<double>([
       TweenSequenceItem(
-        tween: Tween(begin: 0.0, end: -20.0).chain(CurveTween(curve: Curves.easeOutQuad)),
+        tween: Tween(
+          begin: 0.0,
+          end: -20.0,
+        ).chain(CurveTween(curve: Curves.easeOutQuad)),
         weight: 40,
       ),
       TweenSequenceItem(
-        tween: Tween(begin: -20.0, end: 0.0).chain(CurveTween(curve: Curves.bounceOut)),
+        tween: Tween(
+          begin: -20.0,
+          end: 0.0,
+        ).chain(CurveTween(curve: Curves.bounceOut)),
         weight: 60,
       ),
     ]).animate(_jumpController);
@@ -576,7 +628,8 @@ class _JumpingPetMarkerState extends State<_JumpingPetMarker>
   @override
   void didUpdateWidget(covariant _JumpingPetMarker oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.live != widget.live || oldWidget.lastUpdate != widget.lastUpdate) {
+    if (oldWidget.live != widget.live ||
+        oldWidget.lastUpdate != widget.lastUpdate) {
       _jumpController.forward(from: 0.0);
     }
   }
@@ -605,10 +658,7 @@ class _JumpingPetMarkerState extends State<_JumpingPetMarker>
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: Colors.white,
-              border: Border.all(
-                color: AppTheme.green,
-                width: 3,
-              ),
+              border: Border.all(color: AppTheme.green, width: 3),
               boxShadow: [
                 BoxShadow(
                   color: AppTheme.green.withValues(alpha: .35),
@@ -617,10 +667,7 @@ class _JumpingPetMarkerState extends State<_JumpingPetMarker>
                 ),
               ],
             ),
-            child: PetAvatar(
-              photoUrl: widget.photoUrl,
-              size: 50,
-            ),
+            child: PetAvatar(photoUrl: widget.photoUrl, size: 50),
           ),
           const SizedBox(height: 4),
           Container(

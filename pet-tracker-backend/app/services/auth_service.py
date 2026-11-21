@@ -7,9 +7,9 @@ import secrets
 import time
 from typing import Any
 
-from fastapi import Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from firebase_admin import firestore
-from google.api_core.exceptions import GoogleAPIError
+from google.api_core.exceptions import AlreadyExists, GoogleAPIError
 from google.cloud.firestore import Client
 
 from app.core.config import settings
@@ -86,6 +86,7 @@ def create_access_token(user: AuthenticatedUser) -> str:
         "uid": user.uid,
         "email": user.email,
         "display_name": user.display_name,
+        "credential_version": user.credential_version,
         "exp": int(time.time()) + settings.auth_token_ttl_seconds,
     }
     payload_data = _b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
@@ -106,6 +107,7 @@ def verify_access_token(token: str) -> AuthenticatedUser:
             uid=str(payload["uid"]),
             email=payload.get("email"),
             display_name=payload.get("display_name"),
+            credential_version=payload.get("credential_version", ""),
         )
     except Exception as exc:
         logger.info("App token verification failed: %s", exc.__class__.__name__)
@@ -125,9 +127,23 @@ def authenticated_user_from_token(decoded_token: dict[str, Any]) -> Authenticate
     )
 
 
-def get_current_user(authorization: str | None = Header(default=None)) -> AuthenticatedUser:
+def get_session_user(authorization: str | None = Header(default=None)) -> AuthenticatedUser:
     token = extract_bearer_token(authorization)
-    return verify_access_token(token)
+    user = verify_access_token(token)
+    try:
+        return UserProfileService().check_session(user)
+    except GoogleAPIError as exc:
+        raise _profile_unavailable() from exc
+
+
+def get_current_user(user: AuthenticatedUser = Depends(get_session_user)) -> AuthenticatedUser:
+    if user.email_verification_required:
+        raise HTTPException(status_code=403, detail="Verify your email to finish setting up your account.")
+    return user
+
+
+def _profile_unavailable() -> HTTPException:
+    return HTTPException(status_code=503, detail="User profile service is not available.")
 
 
 class UserProfileService:
@@ -138,6 +154,8 @@ class UserProfileService:
     def sync_user_profile(self, user: AuthenticatedUser) -> dict[str, Any]:
         document = self.collection.document(user.uid)
         snapshot = document.get()
+        if snapshot.exists:
+            return self._profile(user, snapshot.to_dict() or {})
 
         payload: dict[str, Any] = {
             "updated_at": firestore.SERVER_TIMESTAMP,
@@ -149,19 +167,75 @@ class UserProfileService:
         if user.email is not None:
             payload["email"] = str(user.email)
 
-        if not snapshot.exists:
-            payload["created_at"] = firestore.SERVER_TIMESTAMP
-            payload.setdefault("display_name", "Firebase User")
-            payload.setdefault("email", "")
+        payload["created_at"] = firestore.SERVER_TIMESTAMP
+        payload.setdefault("display_name", "Pet Owner")
+        payload.setdefault("email", "")
 
         document.set(payload, merge=True)
-        updated_snapshot = document.get()
-        profile = updated_snapshot.to_dict() or {}
+        return self._profile(user, payload)
+
+    @staticmethod
+    def _profile(user: AuthenticatedUser, profile: dict[str, Any]) -> dict[str, Any]:
         return {
             "uid": user.uid,
             "email": profile.get("email") or user.email,
             "display_name": profile.get("display_name") or user.display_name,
+            "phone": profile.get("phone") or None,
+            "location": profile.get("location") or None,
+            "bio": profile.get("bio") or None,
+            **email_account_state(profile),
         }
+
+    @staticmethod
+    def _validate_session(snapshot, user: AuthenticatedUser) -> dict[str, Any]:
+        data = snapshot.to_dict() or {}
+        if not snapshot.exists or data.get("credential_version", "") != user.credential_version:
+            raise _unauthorized()
+        return data
+
+    def check_session(self, user: AuthenticatedUser) -> AuthenticatedUser:
+        profile = self._validate_session(self.collection.document(user.uid).get(), user)
+        return user.model_copy(update=email_account_state(profile))
+
+    def update_profile(self, user: AuthenticatedUser, changes: dict[str, str | None]) -> dict[str, Any]:
+        document = self.collection.document(user.uid)
+        profile = self._validate_session(document.get(), user)
+        payload: dict[str, Any] = {}
+        updated = dict(profile)
+        for field, value in changes.items():
+            if value is None:
+                continue
+            if value:
+                payload[field] = value
+                updated[field] = value
+            else:
+                payload[field] = firestore.DELETE_FIELD
+                updated.pop(field, None)
+        payload["updated_at"] = firestore.SERVER_TIMESTAMP
+        document.update(payload)
+        return self._profile(user, updated)
+
+    def change_password(self, user: AuthenticatedUser, current: str, replacement: str) -> None:
+        document = self.collection.document(user.uid)
+
+        @firestore.transactional
+        def change(transaction):
+            profile = self._validate_session(document.get(transaction=transaction), user)
+            salt = profile.get("password_salt")
+            old_hash = profile.get("password_hash")
+            if not isinstance(salt, str) or not isinstance(old_hash, str) or not verify_password(current, salt, old_hash):
+                raise HTTPException(status_code=400, detail="Current password is incorrect.")
+            if current == replacement:
+                raise HTTPException(status_code=400, detail="Choose a different password.")
+            new_salt, new_hash = create_password_hash(replacement)
+            transaction.update(document, {
+                "password_salt": new_salt,
+                "password_hash": new_hash,
+                "credential_version": secrets.token_hex(16),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            })
+
+        change(self.client.transaction())
 
     def register_user(self, name: str, email: str, password: str) -> AuthenticatedUser:
         normalized_email = email.strip().lower()
@@ -171,17 +245,19 @@ class UserProfileService:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account already exists for this email.")
 
         password_salt, password_hash = create_password_hash(password)
-        document.set(
-            {
+        try:
+            document.create({
                 "email": normalized_email,
                 "display_name": name.strip(),
                 "password_salt": password_salt,
                 "password_hash": password_hash,
+                "requires_email_verification": True,
                 "created_at": firestore.SERVER_TIMESTAMP,
                 "updated_at": firestore.SERVER_TIMESTAMP,
-            }
-        )
-        return AuthenticatedUser(uid=uid, email=normalized_email, display_name=name.strip())
+            })
+        except AlreadyExists as exc:
+            raise HTTPException(status_code=409, detail="An account already exists for this email.") from exc
+        return AuthenticatedUser(uid=uid, email=normalized_email, display_name=name.strip(), email_verification_required=True)
 
     def authenticate_user(self, email: str, password: str) -> AuthenticatedUser:
         normalized_email = email.strip().lower()
@@ -200,7 +276,22 @@ class UserProfileService:
             uid=uid,
             email=profile.get("email") or normalized_email,
             display_name=profile.get("display_name") or "Pet Owner",
+            phone=profile.get("phone") or None,
+            location=profile.get("location") or None,
+            bio=profile.get("bio") or None,
+            credential_version=profile.get("credential_version", ""),
+            **email_account_state(profile),
         )
+
+
+def email_account_state(profile: dict[str, Any]) -> dict[str, bool]:
+    address = profile.get("email")
+    verified = bool(address and profile.get("verified_email") == address)
+    return {
+        "email_verified": verified,
+        "email_verification_required": profile.get("requires_email_verification") is True and not verified,
+        "email_alerts_enabled": verified and profile.get("email_alerts_enabled") is True,
+    }
 
 
 def sync_current_user_profile(user: AuthenticatedUser) -> dict[str, Any]:

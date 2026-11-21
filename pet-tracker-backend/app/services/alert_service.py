@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from google.api_core.exceptions import GoogleAPIError
@@ -8,6 +9,7 @@ from app.schemas.geofences import GeofenceTransitionResult
 from app.schemas.alerts import AlertUpdateRequest
 from app.services.firestore_repositories import AlertRepository, PetRepository
 from app.services.notification_service import NotificationDeliveryError, NotificationService
+from app.services.email_alert_service import send_alert_email
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +28,12 @@ class AlertService:
         alert_repository: AlertRepository | None = None,
         pet_repository: PetRepository | None = None,
         notification_service: NotificationService | None = None,
+        email_sender: Callable[[Alert], None] | None = None,
     ) -> None:
         self.alert_repository = alert_repository or AlertRepository()
         self.pet_repository = pet_repository or PetRepository()
         self.notification_service = notification_service
+        self.email_sender = email_sender
 
     def create_device_offline_alert(self, device: Device) -> Alert:
         pet = self._get_pet(device.pet_id)
@@ -48,7 +52,7 @@ class AlertService:
             )
         )
 
-    def create_device_online_alert(self, device: Device, location: Location) -> Alert:
+    def create_device_online_alert(self, device: Device, location: Location | None) -> Alert:
         pet = self._get_pet(device.pet_id)
         pet_name = pet.name if pet else "Your pet"
         return self._create_alert(
@@ -59,8 +63,8 @@ class AlertService:
                 type=AlertType.DEVICE_ONLINE,
                 title="Tracker Back Online",
                 message=f"{pet_name}'s tracker is back online.",
-                latitude=location.latitude,
-                longitude=location.longitude,
+                latitude=location.latitude if location else None,
+                longitude=location.longitude if location else None,
             )
         )
 
@@ -193,6 +197,8 @@ class AlertService:
             logger.info("Firestore alert creation failed: %s", exc.__class__.__name__)
             raise AlertServiceError("Alert could not be created.") from exc
 
+        if self.email_sender is not None:
+            self.email_sender(alert)
         self._send_notification(alert)
         return alert
 
@@ -219,4 +225,4 @@ def get_alert_service() -> AlertService:
 
 
 def get_alert_delivery_service() -> AlertService:
-    return AlertService(notification_service=NotificationService())
+    return AlertService(notification_service=NotificationService(), email_sender=send_alert_email)

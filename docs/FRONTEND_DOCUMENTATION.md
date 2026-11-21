@@ -9,7 +9,7 @@
 > **Framework:** Flutter (Dart SDK `^3.12.2`)  
 > **State Management & Routing:** GetX (`get: ^4.7.3`)  
 > **Target Platforms:** Android, iOS, Web (PWA), Windows, macOS, Linux  
-> **Map Engine:** `flutter_map` (OpenStreetMap) + OSRM Road Snapping  
+> **Map Engine:** `flutter_map` (OpenStreetMap) with recorded GPS trails
 > **Authentication & Session Persistence:** Custom JWT Bearer Auth + `shared_preferences` persistent login  
 > **Push & Local Notifications:** `firebase_messaging` (`16.7.0`) + `flutter_local_notifications` (`22.3.1`)
 
@@ -95,7 +95,8 @@ pet-tracker-app/
 │   │   │   ├── controllers/auth_controller.dart  # Persistent auth session & login/register logic
 │   │   │   └── views/
 │   │   │       ├── login_screen.dart             # 4-card 10s carousel hero + expandable login form
-│   │   │       └── register_screen.dart          # Account registration screen
+│   │   │       ├── register_screen.dart          # Account registration screen
+│   │   │       └── email_settings_screen.dart    # Email verification & email-alert opt-in
 │   │   ├── devices/
 │   │   │   └── views/
 │   │   │       ├── devices_screen.dart           # Collar Management list
@@ -114,7 +115,11 @@ pet-tracker-app/
 │   │   │       ├── pet_details_screen.dart       # Pet profile, linked collar, & quick actions
 │   │   │       └── pet_form_screen.dart          # Create/Edit Pet with Gallery & Camera photo upload
 │   │   ├── profile/
-│   │   │   └── views/profile_screen.dart         # Account summary & Log Out button
+│   │   │   ├── services/profile_photo_store.dart # Per-account local profile photo storage
+│   │   │   ├── widgets/profile_avatar.dart       # Initials or device-stored photo avatar
+│   │   │   └── views/
+│   │   │       ├── profile_screen.dart           # Account summary & Log Out button
+│   │   │       └── settings_screen.dart          # Profile details, email, password, appearance
 │   │   └── tracking/
 │   │       ├── controllers/tracking_controller.dart # Live polling, history trail, & focus state
 │   │       └── views/
@@ -338,16 +343,12 @@ Defined in [`lib/app/theme/app_theme.dart`](../pet-tracker-app/lib/app/theme/app
 ### 4.11 ESP32 Hardware Wi-Fi Setup (`DeviceWifiSetupScreen`)
 **File:** [`lib/features/devices/views/device_wifi_setup_screen.dart`](../pet-tracker-app/lib/features/devices/views/device_wifi_setup_screen.dart)
 
-<p align="center">
-  <img src="screenshots/15_device_wifi_setup.png" alt="Setup Tracker WiFi Screen" width="340" />
-</p>
+See the [ESP32-C3 firmware and pairing guide](../firmware/README.md) for wiring, firmware upload, and setup troubleshooting.
 
-#### UI Specifications & Manual
-- **High-Contrast Adaptive Cards & Concise Field Labels:** Replaces lengthy paragraph instructions with clean, numbered section cards and concise per-field labels that adapt automatically to Light and Dark themes:
-  1. **1. Tracker Credentials:** Input or auto-fill `Device ID` and `Backend Server URL` (`https://pet-tracker-backend-gamma.vercel.app`), tap **Register & Generate Secret**, and view/copy the `Device Secret Key`.
-  2. **2. Tracker Setup Endpoint:** Configures the ESP32 AP endpoint (`http://192.168.4.1/config`).
-  3. **3. WiFi Network Settings:** Enter the 2.4GHz `WiFi Network (SSID)` and `WiFi Password`, then tap **Send WiFi Setup to Tracker** to provision the collar over HTTP.
-  4. **4. Tracker Online Status:** Live status indicator (`CONNECTED` / `NOT CONNECTED`), battery readout, and **Refresh Status** button.
+1. **Prepare the tracker** while online: enter its `PT-…` code from Serial Monitor, choose its pet, and save the one-time recovery key privately.
+2. **Verify the hotspot:** join `PetTracker-…` with the board's setup password. The app checks `/api/status` for matching firmware and tracker identity before sending any credentials.
+3. **Set Wi-Fi:** enter the hotspot password and the 2.4 GHz network details. The native app sends them to `http://192.168.4.1/config`; the hosted web app shows instructions instead.
+4. **Confirm through the cloud:** reconnect the phone to the internet. The app polls for the device report associated with this setup attempt and distinguishes **Online, waiting for GPS** from **GPS reporting**. Battery can be absent on this hardware.
 
 ---
 
@@ -373,8 +374,11 @@ Defined in [`lib/app/theme/app_theme.dart`](../pet-tracker-app/lib/app/theme/app
 </p>
 
 #### UI Specifications & Manual
-- **Owner Profile Card:** Displays the logged-in owner's avatar initial, display name, and email address.
-- **Account Summary Shortcuts:** Interactive rows showing counts for **My Pet**, **Collars**, and **Unread alerts**.
+- **Owner Profile Card:** Tap the owner's name, photo, and email to open their profile.
+- **Profile Photo:** Owners can choose or take a photo from the Profile screen. The image is compressed and stored only on the current device (per account); it is never uploaded to the backend.
+- **Profile Details:** The profile form saves the display name, phone number, location, and a short bio. Optional fields can be cleared later.
+- **Account Summary Shortcuts:** **My Pets**, **Collars**, and **Unread Alerts** open the corresponding screens. Unread Alerts opens with the Unread filter selected.
+- **Settings:** Edit the display name, review the sign-in email, or change the password and sign in again. Appearance offers **Follow system**, **Light**, or **Dark**, saved on the current device. Settings also includes a default map location shortcut and a toggle for in-app alert banners.
 - **Explicit Log Out Button:** Tapping **Log Out** unregisters the device's FCM push token, clears the persisted JWT session token from `SharedPreferences`, clears cached state, and returns the user to the **Login Landing Screen**.
 
 ---
@@ -384,6 +388,7 @@ Defined in [`lib/app/theme/app_theme.dart`](../pet-tracker-app/lib/app/theme/app
 ### 5.1 Networking & Persistent Auth Layer ([`ApiClient`](../pet-tracker-app/lib/core/api/api_client.dart))
 - **Persistent JWT Storage:** On login/register, `setAuthToken(token)` stores the Bearer token in `SharedPreferences` under `pet_tracker_jwt_token`. On app launch, `AuthController.onInit()` calls `api.initTokenFromStorage()` and verifies the session via `GET /api/v1/auth/me`.
 - **Smart GET Caching & Deduplication:** Caches repeatable `GET` requests for 20 seconds (and `/places` lookups for 24 hours) while bypassing cache for live `/devices` and `/location-history` endpoints. Any `POST`, `PATCH`, or `DELETE` request automatically invalidates the cache.
+- **Automatic Refresh:** Dashboard lists refresh every 30 seconds while signed in and foregrounded and immediately on resume. Live Map polls its collar every 15 seconds. History loads recorded points on demand and fits the map to the trail.
 - **Automatic 401 Handling:** If the backend returns `401 Unauthorized`, `ApiClient` clears the stored token and redirects cleanly to `Routes.login`.
 
 ### 5.2 Web & Mobile Push Notification Service ([`NotificationService`](../pet-tracker-app/lib/core/services/notification_service.dart))

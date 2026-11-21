@@ -29,7 +29,7 @@ def initialize_firebase_app() -> App:
             return firebase_admin.initialize_app(credential, options or None)
         except Exception as exc:
             raise FirebaseInitializationError(
-                f"FIREBASE_SERVICE_ACCOUNT_JSON could not be parsed: {exc}"
+                "FIREBASE_SERVICE_ACCOUNT_JSON could not be parsed or initialized."
             ) from exc
 
     # 2. Otherwise fall back to local file path

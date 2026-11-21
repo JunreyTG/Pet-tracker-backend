@@ -11,6 +11,7 @@ Pet_tracker_system/
 ├── docs/                             # Comprehensive system documentation
 │   ├── BACKEND_DOCUMENTATION.md      # FastAPI backend architecture, API reference, & setup
 │   └── FRONTEND_DOCUMENTATION.md     # Flutter app architecture, state management, & UI workflows
+├── firmware/PetTracker/               # ESP32-C3 + NEO-6M Arduino firmware
 ├── pet-tracker-backend/              # Python FastAPI + Firebase Admin + Firestore backend
 │   ├── app/                          # Routers, schemas, models, and business logic services
 │   ├── tests/                        # Pytest automated test suites
@@ -28,7 +29,8 @@ Pet_tracker_system/
 ## 📖 Detailed Documentation
 
 - **[Backend Technical & API Documentation](docs/BACKEND_DOCUMENTATION.md):** Complete guide to FastAPI endpoints, dual-scheme authentication (Firebase ID Token + PBKDF2 device secrets), Cloud Firestore schemas, Haversine geofencing, heartbeat/offline monitoring, and Firebase Cloud Messaging (FCM).
-- **[Frontend Technical & UI Documentation](docs/FRONTEND_DOCUMENTATION.md):** Comprehensive guide to Flutter app architecture, GetX reactive state management, `flutter_map` OpenStreetMap integration, OSRM road route snapping, and the ESP32 Wi-Fi provisioning wizard.
+- **[Frontend Technical & UI Documentation](docs/FRONTEND_DOCUMENTATION.md):** Guide to Flutter app architecture, GetX state management, OpenStreetMap, GPS trails, and ESP32 Wi-Fi provisioning.
+- **[Tracker Firmware & Pairing Guide](firmware/README.md):** Wiring, Arduino build, tracker hotspot, cloud setup, and local dashboard.
 
 ---
 

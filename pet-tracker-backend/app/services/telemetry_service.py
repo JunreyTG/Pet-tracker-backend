@@ -6,7 +6,7 @@ from firebase_admin import firestore
 
 from app.core.config import settings
 from app.models.entities import Device, DeviceStatus, Location, TrackingHistoryCreate
-from app.schemas.telemetry import DeviceTelemetryRequest
+from app.schemas.telemetry import DeviceHeartbeatRequest, DeviceTelemetryRequest
 from app.services.device_service import DeviceAuthenticationError, DeviceAuthenticationService, DeviceServiceError
 from app.services.firestore_repositories import DeviceRepository, TrackingHistoryRepository
 from app.services.geofence_service import GeofenceService, GeofenceServiceError
@@ -46,7 +46,7 @@ class TelemetryService:
             else settings.low_battery_threshold_percent
         )
 
-    def receive_telemetry(self, data: DeviceTelemetryRequest) -> None:
+    def _assigned_device(self, data: DeviceHeartbeatRequest) -> Device:
         try:
             device = self.device_authentication_service.verify_device_credentials(data.device_id, data.device_secret)
         except DeviceAuthenticationError:
@@ -56,13 +56,35 @@ class TelemetryService:
 
         if device.pet_id is None:
             raise DeviceNotAssignedError("Device is not assigned to a pet.")
+        return device
+
+    def _presence_fields(self, data: DeviceHeartbeatRequest, *, has_fix: bool) -> dict:
+        return {
+            "status": DeviceStatus.ONLINE,
+            "last_seen": firestore.SERVER_TIMESTAMP,
+            "gps_fix": has_fix,
+            "setup_nonce": data.setup_nonce,
+        }
+
+    def receive_heartbeat(self, data: DeviceHeartbeatRequest) -> None:
+        device = self._assigned_device(data)
+        try:
+            self.device_repository.update_fields(device.device_id, self._presence_fields(data, has_fix=False))
+            self._create_online_recovery_alert_if_needed(device, None)
+        except (GoogleAPIError, AlertServiceError) as exc:
+            logger.info("Tracker heartbeat failed: %s", exc.__class__.__name__)
+            raise TelemetryServiceError("Tracker heartbeat could not be processed.") from exc
+
+    def receive_telemetry(self, data: DeviceTelemetryRequest) -> None:
+        device = self._assigned_device(data)
 
         try:
             self._update_device_location(device, data)
             self._create_tracking_history(device, data)
             location = Location(latitude=data.latitude, longitude=data.longitude)
             self._create_online_recovery_alert_if_needed(device, location)
-            self._evaluate_low_battery(device, data.battery_level, location)
+            if data.battery_level is not None:
+                self._evaluate_low_battery(device, data.battery_level, location)
             geofence_service = self.geofence_service or GeofenceService()
             transitions = geofence_service.evaluate_enabled_geofences_for_pet(device.pet_id, location)
             self._create_geofence_alerts(device, transitions, location)
@@ -75,18 +97,16 @@ class TelemetryService:
             raise TelemetryServiceError("Telemetry alert evaluation failed.") from exc
 
     def _update_device_location(self, device: Device, data: DeviceTelemetryRequest) -> None:
-        self.device_repository.update_fields(
-            device.device_id,
-            {
-                "status": DeviceStatus.ONLINE,
-                "battery_level": data.battery_level,
-                "current_location": Location(latitude=data.latitude, longitude=data.longitude).model_dump(),
-                "last_seen": firestore.SERVER_TIMESTAMP,
-                "last_location_update": firestore.SERVER_TIMESTAMP,
-            },
+        fields = self._presence_fields(data, has_fix=True)
+        fields.update(
+            current_location=Location(latitude=data.latitude, longitude=data.longitude).model_dump(),
+            last_location_update=firestore.SERVER_TIMESTAMP,
         )
+        if data.battery_level is not None:
+            fields["battery_level"] = data.battery_level
+        self.device_repository.update_fields(device.device_id, fields)
 
-    def _create_online_recovery_alert_if_needed(self, device: Device, location: Location) -> None:
+    def _create_online_recovery_alert_if_needed(self, device: Device, location: Location | None) -> None:
         if device.status is DeviceStatus.OFFLINE:
             alert_service = self.alert_service or get_alert_delivery_service()
             alert_service.create_device_online_alert(device, location)

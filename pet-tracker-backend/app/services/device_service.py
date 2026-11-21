@@ -163,7 +163,7 @@ class DeviceAuthenticationService:
             logger.info("Firestore device credential lookup failed: %s", exc.__class__.__name__)
             raise DeviceServiceError("Device credentials could not be verified.") from exc
 
-        if device is None or not verify_device_secret(device_secret, device.device_secret_hash):
+        if device is None or device.status == DeviceStatus.DISABLED or not verify_device_secret(device_secret, device.device_secret_hash):
             raise DeviceAuthenticationError("Invalid device credentials.")
 
         return device

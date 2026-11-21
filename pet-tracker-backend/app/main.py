@@ -1,9 +1,13 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
 from app.api.alerts import router as alerts_router
@@ -15,6 +19,7 @@ from app.api.pets import router as pets_router
 from app.api.places import router as places_router
 from app.api.telemetry import router as telemetry_router
 from app.core.config import settings
+from app.firebase.admin import FirebaseInitializationError
 from app.services.heartbeat_service import HeartbeatService, HeartbeatServiceError
 
 logger = logging.getLogger(__name__)
@@ -24,7 +29,7 @@ async def _heartbeat_loop(stop_event: asyncio.Event) -> None:
     """Best-effort in-process heartbeat loop; use one worker or an external scheduler in production."""
     while not stop_event.is_set():
         try:
-            result = HeartbeatService().check_devices_for_offline_status()
+            result = await asyncio.to_thread(lambda: HeartbeatService().check_devices_for_offline_status())
             if result.marked_offline_count:
                 logger.info("Marked %s device(s) offline.", result.marked_offline_count)
         except HeartbeatServiceError as exc:
@@ -40,6 +45,9 @@ async def _heartbeat_loop(stop_event: asyncio.Event) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if os.getenv("VERCEL") or settings.device_offline_check_secret:
+        yield
+        return
     stop_event = asyncio.Event()
     heartbeat_task = asyncio.create_task(_heartbeat_loop(stop_event))
     app.state.heartbeat_task = heartbeat_task
@@ -69,6 +77,18 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(FirebaseInitializationError)
+    async def firebase_unavailable(_request: Request, exc: FirebaseInitializationError):
+        logger.error("Firebase initialization failed: %s", exc)
+        return JSONResponse(status_code=503, content={"detail": "Database is not available."})
+
+    @app.exception_handler(RequestValidationError)
+    async def sanitize_secret_validation(request: Request, exc: RequestValidationError):
+        if request.url.path in {"/api/v1/auth/password", "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/email/verify", "/api/v1/device/heartbeat", "/api/v1/device/telemetry"}:
+            return JSONResponse(status_code=422, content={"detail": "Check the required fields and their allowed lengths or values."})
+        return await request_validation_exception_handler(request, exc)
+
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(alerts_router)

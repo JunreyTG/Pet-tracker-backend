@@ -52,7 +52,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Create your owner account to start tracking.',
+                      'Use an email you can access. We’ll send a code to verify your account.',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     const SizedBox(height: 20),
@@ -67,6 +67,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     TextField(
                       controller: email,
                       keyboardType: TextInputType.emailAddress,
+                      autofillHints: const [AutofillHints.email],
+                      autocorrect: false,
                       decoration: const InputDecoration(
                         labelText: 'Email Address',
                         prefixIcon: Icon(Icons.email_outlined),

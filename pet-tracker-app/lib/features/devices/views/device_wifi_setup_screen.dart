@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -34,9 +35,8 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
   final code = TextEditingController();
   final wifiName = TextEditingController();
   final wifiPassword = TextEditingController();
+  final hotspotPassword = TextEditingController();
   final savedSecret = TextEditingController();
-  final backendUrl = TextEditingController(text: AppConfig.baseUrl);
-  final setupAddress = TextEditingController(text: 'http://192.168.4.1/config');
   final scrollController = ScrollController();
   late final TrackerLocalSetup localSetup =
       widget.localSetup ?? TrackerLocalSetup();
@@ -44,7 +44,8 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
   String? petId;
   DeviceProvisioningModel? provisioning;
   DeviceModel? reportedDevice;
-  DateTime? sentAt;
+  String? setupNonce;
+  static const maxChecks = 30;
   Timer? pollTimer;
   int pollCount = 0;
   int step = 0;
@@ -59,9 +60,9 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
   String? error, detail, notice;
 
   bool get browser => widget.browserOverride ?? kIsWeb;
-  String get trackerId => code.text.trim();
+  String get trackerId => code.text.trim().toUpperCase();
   String get expectedNetwork =>
-      provisioning?.setupHotspotSsid ?? 'PET_TRACKER_SETUP_$trackerId';
+      'PetTracker-${trackerId.substring(trackerId.length - 6)}';
   String get storageKey {
     final uid =
         Get.find<AuthController>().backendUser.value?.uid ?? 'signed_out';
@@ -135,9 +136,8 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
       code,
       wifiName,
       wifiPassword,
+      hotspotPassword,
       savedSecret,
-      backendUrl,
-      setupAddress,
     ]) {
       c.dispose();
     }
@@ -216,8 +216,8 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
 
   Future<void> findTracker() async {
     if (busy) return;
-    if (trackerId.isEmpty) {
-      fail('Enter the tracker code supplied with your device.');
+    if (!TrackerLocalSetup.validDeviceCode(trackerId)) {
+      fail('Enter the PT- code shown in the tracker’s Serial Monitor.');
       return;
     }
     if (loadingPets) return;
@@ -231,11 +231,11 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
       );
       return;
     }
-    final backend = Uri.tryParse(backendUrl.text.trim());
-    if (backend == null ||
-        !{'http', 'https'}.contains(backend.scheme) ||
-        backend.host.isEmpty) {
-      fail('The service address in Advanced Settings is invalid.');
+    final backend = Uri.tryParse(AppConfig.baseUrl);
+    if (backend == null || backend.scheme != 'https' || backend.host.isEmpty) {
+      fail(
+        'This app must be connected to an HTTPS backend to set up ESP32-C3 trackers.',
+      );
       return;
     }
     setState(() {
@@ -254,7 +254,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
         if (registered == null && savedSecret.text.trim().isEmpty) {
           provisioning = await data.devicesRepo.provision(
             trackerId,
-            backendUrl: backendUrl.text.trim(),
+            backendUrl: AppConfig.baseUrl,
           );
         } else if (registered != null && savedSecret.text.trim().isEmpty) {
           fail(
@@ -298,29 +298,6 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
     }
   }
 
-  Uri? endpoint() {
-    final uri = Uri.tryParse(setupAddress.text.trim());
-    if (uri == null ||
-        uri.scheme != 'http' ||
-        uri.path != '/config' ||
-        uri.userInfo.isNotEmpty ||
-        uri.hasQuery ||
-        uri.hasFragment) {
-      return null;
-    }
-    final parts = uri.host.split('.').map(int.tryParse).toList();
-    if (parts.length != 4 || parts.any((n) => n == null || n < 0 || n > 255)) {
-      return null;
-    }
-    final a = parts[0]!, b = parts[1]!;
-    if (a != 10 &&
-        !(a == 172 && b >= 16 && b <= 31) &&
-        !(a == 192 && b == 168)) {
-      return null;
-    }
-    return uri;
-  }
-
   Future<void> checkConnection() async {
     if (busy) return;
     if (browser) {
@@ -329,27 +306,22 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
       );
       return;
     }
-    final target = endpoint();
-    if (target == null) {
-      fail('The tracker setup address in Advanced Settings is invalid.');
-      return;
-    }
     setState(() {
       busy = true;
       error = null;
       detail = null;
+      addressAnswered = false;
     });
     try {
-      final answered = await localSetup.checkConnection(target);
+      final answered = await localSetup.checkConnection(trackerId);
       if (!mounted) return;
       setState(() {
         addressAnswered = answered;
         if (answered) {
-          notice =
-              'The setup address answered. Make sure you joined the tracker network shown above.';
+          notice = 'The tracker code matches. You can continue.';
         } else {
           error =
-              'We reached a device, but its setup page is unavailable. Check the tracker network and try again.';
+              'This does not match your tracker in setup mode. Check the tracker code, firmware, and network name.';
         }
       });
     } catch (e) {
@@ -364,17 +336,26 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
 
   Future<void> sendWifi() async {
     if (busy || browser) return;
-    if (wifiName.text.trim().isEmpty) {
-      fail('Enter the name of the WiFi network your tracker should use.');
+    if (wifiName.text.isEmpty || utf8.encode(wifiName.text).length > 32) {
+      fail('Enter a Wi-Fi network name of 1–32 bytes.');
+      return;
+    }
+    final passwordLength = utf8.encode(wifiPassword.text).length;
+    if (passwordLength != 0 && (passwordLength < 8 || passwordLength > 63)) {
+      fail(
+        'Use a Wi-Fi password of 8–63 bytes, or leave it empty for an open network.',
+      );
+      return;
+    }
+    final key = hotspotPassword.text.trim();
+    if (!RegExp(r'^[0-9a-f]{16}$').hasMatch(key)) {
+      fail(
+        'Enter the 16-character setup hotspot password from Serial Monitor.',
+      );
       return;
     }
     if (!addressAnswered) {
       fail('Check your connection to the tracker before sending WiFi details.');
-      return;
-    }
-    final target = endpoint();
-    if (target == null) {
-      fail('The tracker setup address in Advanced Settings is invalid.');
       return;
     }
     final secret = provisioning?.deviceSecret ?? savedSecret.text.trim();
@@ -390,31 +371,39 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
       detail = null;
     });
     try {
-      final started = DateTime.now();
+      final nonce = TrackerLocalSetup.newSetupNonce();
       final delivery = await localSetup.sendConfiguration(
-        endpoint: target,
-        wifiName: wifiName.text.trim(),
+        wifiName: wifiName.text,
         wifiPassword: wifiPassword.text,
+        hotspotPassword: key,
         deviceId: trackerId,
         deviceSecret: secret,
-        backendUrl: provisioning?.backendUrl ?? backendUrl.text.trim(),
+        backendUrl: provisioning?.backendUrl ?? AppConfig.baseUrl,
+        setupNonce: nonce,
       );
-      wifiPassword.clear();
       if (!mounted) return;
-      sentAt = started;
+      wifiPassword.clear();
+      hotspotPassword.clear();
+      setupNonce = nonce;
       uncertainDelivery = delivery == TrackerDelivery.unconfirmed;
       confirmedOnline = false;
       reportedDevice = null;
       goTo(3);
       startPolling();
     } on TrackerConfigurationRejected catch (e) {
-      wifiPassword.clear();
       fail(
-        'Your tracker did not accept the WiFi details. Check the network name and password, then try again.',
+        e.statusCode == 403
+            ? 'Use the setup hotspot password shown in Serial Monitor.'
+            : 'The tracker rejected the settings. Check the Wi-Fi details and that the firmware and app use the same HTTPS backend.',
         'Tracker response: HTTP ${e.statusCode}',
       );
+    } on TrackerIdentityMismatch {
+      if (mounted) goTo(1);
+      addressAnswered = false;
+      fail(
+        'The setup connection changed. Rejoin the network and verify your tracker again.',
+      );
     } catch (e) {
-      wifiPassword.clear();
       fail(
         'We could not send WiFi details. Reconnect to the tracker network and try again.',
         e.runtimeType.toString(),
@@ -429,7 +418,9 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
     pollCount = 0;
     checkStatus();
     pollTimer = Timer.periodic(const Duration(seconds: 6), (_) {
-      if (step != 3 || confirmedOnline || pollCount >= 20) {
+      if (step != 3 ||
+          reportedDevice?.gpsFix == true && confirmedOnline ||
+          pollCount >= maxChecks) {
         pollTimer?.cancel();
       } else {
         checkStatus();
@@ -438,7 +429,8 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
   }
 
   Future<void> checkStatus() async {
-    if (checking || sentAt == null || step != 3) return;
+    final nonce = setupNonce;
+    if (checking || nonce == null || step != 3) return;
     setState(() {
       checking = true;
       error = null;
@@ -446,16 +438,17 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
     pollCount++;
     try {
       final device = await data.devicesRepo.get(trackerId);
-      if (!mounted || step != 3) return;
+      if (!mounted || step != 3 || nonce != setupNonce) return;
+      final wasOnline = confirmedOnline;
       setState(() {
         reportedDevice = device;
-        confirmedOnline = hasFreshOnlineReport(device, sentAt!);
+        confirmedOnline = hasFreshOnlineReport(device, nonce);
         notice = confirmedOnline
             ? null
             : 'We have not received a new connection from your tracker yet.';
       });
-      if (confirmedOnline) {
-        pollTimer?.cancel();
+      if (confirmedOnline && device.gpsFix == true) pollTimer?.cancel();
+      if (confirmedOnline && !wasOnline) {
         clearProgress();
         data.refreshAll();
       }
@@ -608,7 +601,9 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
       2 => 'Choose Your WiFi Network',
       _ =>
         confirmedOnline
-            ? 'Your Pet Tracker Is Ready!'
+            ? reportedDevice?.gpsFix == true
+                  ? 'Your Tracker Is Reporting GPS'
+                  : 'Your Tracker Is Online'
             : 'Connecting Your Tracker',
     };
     final description = switch (step) {
@@ -619,7 +614,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
         'Choose the WiFi network your tracker will use to send location updates.',
       _ =>
         confirmedOnline
-            ? 'Your tracker has sent a fresh update and is online.'
+            ? 'The cloud received a report from this setup.'
             : 'Your tracker may restart now. Reconnect this phone to your usual internet connection.',
     };
     return Column(
@@ -689,7 +684,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
         Text('Turn on your tracker', style: theme.textTheme.titleLarge),
         const SizedBox(height: 6),
         const Text(
-          'Stay on your usual internet connection for now. Turn on the tracker; we will tell you when to join its temporary WiFi network. If that network does not appear later, restart the tracker and follow its hardware guide.',
+          'Stay on the internet for this step. Turn on the tracker and read its PT- code in Arduino Serial Monitor (115200 baud).',
         ),
         const SizedBox(height: 18),
         TextField(
@@ -699,7 +694,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
           autocorrect: false,
           decoration: const InputDecoration(
             labelText: 'Tracker code',
-            hintText: 'Code supplied with your tracker',
+            hintText: 'PT- followed by 12 characters',
             prefixIcon: Icon(Icons.qr_code),
           ),
           onChanged: (_) => setState(() {
@@ -710,7 +705,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
         ),
         const SizedBox(height: 8),
         Text(
-          'The current hardware cannot be discovered automatically. This code links the tracker to your account.',
+          'This code identifies the ESP32-C3. You’ll also need its setup hotspot password from Serial Monitor.',
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 18),
@@ -762,7 +757,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
         ),
         if (showHelp)
           const Text(
-            'Check the code supplied with the tracker and look for a WiFi network beginning PET_TRACKER_SETUP_. The exact setup-button behavior is not documented in this project; check your hardware guide if the network does not appear.',
+            'On an already configured tracker, hold BOOT for four seconds after startup to open its PetTracker-… hotspot. Do not hold BOOT while powering on.',
           ),
       ],
     );
@@ -796,7 +791,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
         ),
         const SizedBox(height: 10),
         const Text(
-          'This is the tracker’s temporary network, not your home WiFi. Confirm the name matches the network you see.',
+          'Use the setup password printed in Serial Monitor to join this network. Stay connected even if the phone says it has no internet.',
         ),
         const SizedBox(height: 16),
         messageBox(instructions, Icons.settings, AppTheme.green),
@@ -809,7 +804,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
         if (addressAnswered) ...[
           const SizedBox(height: 12),
           messageBox(
-            'The setup address responded. You can continue.',
+            'The firmware and tracker code match. You can continue.',
             Icons.check_circle_outline,
             AppTheme.green,
           ),
@@ -837,12 +832,14 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
           ),
           const SizedBox(height: 10),
           const Text(
-            'This website uses HTTPS, while the tracker currently accepts setup details over local HTTP. Browsers may block that request. Install the Android app, sign in, and start setup again there. Your tracker code is saved; WiFi passwords and recovery keys are not.',
+            'The hosted website cannot securely submit settings to the tracker over local HTTP. Sign in to the updated Android app to finish cloud setup.',
           ),
           const SizedBox(height: 16),
-          const Text('Open this download address on your Android phone:'),
+          const Text(
+            'On the tracker’s Wi-Fi, open this address in a separate browser tab for the local dashboard:',
+          ),
           const SizedBox(height: 4),
-          SelectableText('${AppConfig.baseUrl}/download-apk'),
+          const SelectableText('http://192.168.4.1/'),
         ],
       );
     }
@@ -850,6 +847,18 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Icon(Icons.router_outlined, size: 48, color: AppTheme.green),
+        const SizedBox(height: 14),
+        TextField(
+          controller: hotspotPassword,
+          autocorrect: false,
+          obscureText: true,
+          textInputAction: TextInputAction.next,
+          decoration: const InputDecoration(
+            labelText: 'Tracker setup hotspot password',
+            helperText: 'The 16-character password in Serial Monitor.',
+            prefixIcon: Icon(Icons.wifi_tethering),
+          ),
+        ),
         const SizedBox(height: 14),
         TextField(
           controller: wifiName,
@@ -881,7 +890,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
         ),
         const SizedBox(height: 16),
         messageBox(
-          'Most ESP32 trackers need a 2.4 GHz WiFi network. Check your router if the tracker does not come online.',
+          'The ESP32-C3 needs a 2.4 GHz Wi-Fi network with internet access.',
           Icons.info_outline,
           Colors.amber.shade800,
         ),
@@ -899,9 +908,16 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Center(child: CircularProgressIndicator(color: AppTheme.green)),
+          if (pollCount < maxChecks)
+            const Center(
+              child: CircularProgressIndicator(color: AppTheme.green),
+            ),
           const SizedBox(height: 18),
-          const Text('Waiting for a fresh location update from your tracker.'),
+          Text(
+            uncertainDelivery
+                ? 'Waiting for a cloud report from this setup.'
+                : 'Wi-Fi settings accepted. Waiting for the tracker to reach the cloud.',
+          ),
           const SizedBox(height: 10),
           if (uncertainDelivery)
             messageBox(
@@ -913,10 +929,10 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
           const Text(
             'If this phone still shows “No Internet,” reconnect it to your usual WiFi or mobile data. Make sure the tracker is powered on and near your home router.',
           ),
-          if (pollCount >= 20) ...[
+          if (pollCount >= maxChecks) ...[
             const SizedBox(height: 12),
             messageBox(
-              'Your tracker is still offline. Check the WiFi name and password, then try again.',
+              'No cloud report yet. Check the Wi-Fi details and view the tracker’s local dashboard or Serial Monitor for the last cloud response.',
               Icons.warning_amber,
               Colors.amber.shade800,
             ),
@@ -956,7 +972,9 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
         ),
         const SizedBox(height: 8),
         messageBox(
-          'Online — a new update was received.',
+          device?.gpsFix == true
+              ? 'GPS reporting — a location was received.'
+              : 'Online, waiting for GPS. Give the collar a clear view of the sky.',
           Icons.sensors,
           AppTheme.green,
         ),
@@ -991,7 +1009,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
         busy
             ? 'Connecting your tracker...'
             : browser
-            ? 'Copy Android App Link'
+            ? 'Copy Local Dashboard Address'
             : 'Connect Tracker to WiFi',
       _ =>
         confirmedOnline
@@ -1009,14 +1027,12 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
               browser
                   ? () async {
                       await Clipboard.setData(
-                        ClipboardData(
-                          text: '${AppConfig.baseUrl}/download-apk',
-                        ),
+                        ClipboardData(text: 'http://192.168.4.1/'),
                       );
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text('Android app download link copied.'),
+                            content: Text('Local dashboard address copied.'),
                           ),
                         );
                       }
@@ -1071,17 +1087,9 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
     subtitle: const Text('For support or a previously registered tracker'),
     childrenPadding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
     children: [
-      TextField(
-        controller: backendUrl,
-        autocorrect: false,
-        decoration: const InputDecoration(labelText: 'Backend Server URL'),
-      ),
+      SelectableText('Cloud backend: ${AppConfig.baseUrl}'),
       const SizedBox(height: 12),
-      TextField(
-        controller: setupAddress,
-        autocorrect: false,
-        decoration: const InputDecoration(labelText: 'Tracker setup address'),
-      ),
+      SelectableText('Local setup: ${TrackerLocalSetup.endpoint}'),
       const SizedBox(height: 12),
       TextField(
         controller: savedSecret,
@@ -1109,7 +1117,7 @@ class _DeviceWifiSetupScreenState extends State<DeviceWifiSetupScreen> {
       ],
       const SizedBox(height: 8),
       const Text(
-        'Only use a setup address supplied with your tracker. The current firmware contract uses local HTTP; it does not encrypt WiFi details on the tracker network.',
+        'Local setup uses HTTP over the tracker’s password-protected hotspot. Cloud updates use HTTPS.',
       ),
     ],
   );

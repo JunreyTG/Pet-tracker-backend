@@ -38,7 +38,9 @@ class BackendAuthRepository {
       ),
     );
     _api.setAuthToken(response['access_token'] ?? '');
-    final user = UserModel.fromJson(Map<String, dynamic>.from(response['user']));
+    final user = UserModel.fromJson(
+      Map<String, dynamic>.from(response['user']),
+    );
     _saveCachedUser(user);
     return user;
   }
@@ -51,14 +53,55 @@ class BackendAuthRepository {
       ),
     );
     _api.setAuthToken(response['access_token'] ?? '');
-    final user = UserModel.fromJson(Map<String, dynamic>.from(response['user']));
+    final user = UserModel.fromJson(
+      Map<String, dynamic>.from(response['user']),
+    );
     _saveCachedUser(user);
     return user;
   }
 
   Future<UserModel> me() async {
-    final user = UserModel.fromJson(Map<String, dynamic>.from(await _api.get('/auth/me')));
+    final user = UserModel.fromJson(
+      Map<String, dynamic>.from(await _api.get('/auth/me')),
+    );
     _saveCachedUser(user);
+    return user;
+  }
+
+  Future<UserModel> updateDisplayName(String name) =>
+      updateProfile({'display_name': name});
+
+  Future<UserModel> updateProfile(Map<String, dynamic> changes) async {
+    final token = _api.authToken;
+    final user = UserModel.fromJson(
+      Map<String, dynamic>.from(await _api.patch('/auth/me', body: changes)),
+    );
+    if (token == _api.authToken) _saveCachedUser(user);
+    return user;
+  }
+
+  Future<void> changePassword(String current, String replacement) async {
+    await _api.post(
+      '/auth/password',
+      body: {'current_password': current, 'new_password': replacement},
+    );
+  }
+
+  Future<void> sendEmailVerification() async {
+    await _api.post('/auth/email/send');
+  }
+
+  Future<UserModel> verifyEmail(String code) =>
+      _updateEmail(() => _api.post('/auth/email/verify', body: {'code': code}));
+
+  Future<UserModel> setEmailAlerts(bool enabled) => _updateEmail(
+    () => _api.patch('/auth/email/alerts', body: {'enabled': enabled}),
+  );
+
+  Future<UserModel> _updateEmail(Future<dynamic> Function() request) async {
+    final token = _api.authToken;
+    final user = UserModel.fromJson(Map<String, dynamic>.from(await request()));
+    if (token == _api.authToken) _saveCachedUser(user);
     return user;
   }
 
@@ -79,15 +122,19 @@ class BackendAuthRepository {
   }
 
   void _saveCachedUser(UserModel user) {
-    SharedPreferences.getInstance().then((prefs) {
-      prefs.setString(_userStorageKey, jsonEncode(user.toJson()));
-    }).catchError((_) {});
+    SharedPreferences.getInstance()
+        .then((prefs) {
+          prefs.setString(_userStorageKey, jsonEncode(user.toJson()));
+        })
+        .catchError((_) {});
   }
 
   void _clearCachedUser() {
-    SharedPreferences.getInstance().then((prefs) {
-      prefs.remove(_userStorageKey);
-    }).catchError((_) {});
+    SharedPreferences.getInstance()
+        .then((prefs) {
+          prefs.remove(_userStorageKey);
+        })
+        .catchError((_) {});
   }
 }
 

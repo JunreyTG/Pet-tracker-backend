@@ -58,19 +58,30 @@ class DeviceDetailsScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
                       _DetailChip(
                         icon: Icons.wifi_tethering,
                         text: d.status,
                         color: online ? AppTheme.green : AppTheme.orange,
                       ),
-                      const SizedBox(width: 8),
                       _DetailChip(
                         icon: Icons.battery_5_bar,
-                        text: '${d.batteryLevel?.toString() ?? '--'}%',
+                        text: d.batteryLevel == null
+                            ? 'Battery not reported'
+                            : '${d.batteryLevel}%',
                         color: const Color(0xFFE5B64A),
                       ),
+                      if (online && d.gpsFix != null)
+                        _DetailChip(
+                          icon: d.gpsFix!
+                              ? Icons.gps_fixed
+                              : Icons.gps_not_fixed,
+                          text: d.gpsFix! ? 'GPS reporting' : 'Waiting for GPS',
+                          color: d.gpsFix! ? AppTheme.green : AppTheme.orange,
+                        ),
                     ],
                   ),
                 ],

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models.entities import Device, DeviceStatus, TrackingHistoryCreate
-from app.schemas.telemetry import DeviceTelemetryRequest
+from app.schemas.telemetry import DeviceHeartbeatRequest, DeviceTelemetryRequest
 from app.services.device_service import DeviceAuthenticationError
 from app.services.telemetry_service import DeviceNotAssignedError, TelemetryService, get_telemetry_service
 
@@ -91,6 +91,12 @@ class FakeTelemetryRouteService:
         if self.unassigned:
             raise DeviceNotAssignedError("Device is not assigned to a pet.")
 
+    def receive_heartbeat(self, data: DeviceHeartbeatRequest) -> None:
+        if self.should_reject:
+            raise DeviceAuthenticationError("Invalid device credentials.")
+        if self.unassigned:
+            raise DeviceNotAssignedError("Device is not assigned to a pet.")
+
 
 @pytest.fixture(autouse=True)
 def clear_dependency_overrides() -> None:
@@ -119,6 +125,53 @@ def test_valid_telemetry_succeeds() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"message": "Telemetry received successfully"}
+
+
+PAIRING_NONCE = "a3" * 16
+
+
+@pytest.mark.parametrize(("reject", "unassigned", "status"), [(False, False, 200), (True, False, 401), (False, True, 409)])
+def test_heartbeat_route_authentication_and_assignment(reject, unassigned, status) -> None:
+    app.dependency_overrides[get_telemetry_service] = lambda: FakeTelemetryRouteService(reject, unassigned)
+    response = client.post("/api/v1/device/heartbeat", json={
+        "device_id": "PT-012345ABCDEF", "device_secret": "raw-secret", "setup_nonce": PAIRING_NONCE,
+    })
+    assert response.status_code == status
+
+
+def test_heartbeat_updates_presence_without_writing_a_location() -> None:
+    devices = FakeDeviceRepository()
+    history = FakeTrackingHistoryRepository()
+    fences = FakeGeofenceService()
+    service = TelemetryService(
+        device_authentication_service=FakeDeviceAuthenticationService(),
+        device_repository=devices, tracking_history_repository=history, geofence_service=fences,
+    )
+    service.receive_heartbeat(DeviceHeartbeatRequest(device_id="PT-012345ABCDEF", device_secret="raw-secret", setup_nonce=PAIRING_NONCE))
+    assert devices.updated_payload is not None
+    assert set(devices.updated_payload) == {"status", "last_seen", "gps_fix", "setup_nonce"}
+    assert devices.updated_payload["status"] == DeviceStatus.ONLINE
+    assert devices.updated_payload["setup_nonce"] == PAIRING_NONCE
+    assert devices.updated_payload["gps_fix"] is False
+    assert history.created is None and fences.evaluated is None
+
+
+def test_gps_without_battery_still_writes_history_and_runs_safe_zones() -> None:
+    devices = FakeDeviceRepository()
+    history = FakeTrackingHistoryRepository()
+    fences = FakeGeofenceService()
+    service = TelemetryService(
+        device_authentication_service=FakeDeviceAuthenticationService(),
+        device_repository=devices, tracking_history_repository=history, geofence_service=fences,
+    )
+    payload = telemetry_payload(setup_nonce=PAIRING_NONCE)
+    del payload["battery_level"]
+    service.receive_telemetry(DeviceTelemetryRequest(**payload))
+    assert history.created is not None and history.created.battery_level is None
+    assert fences.evaluated is not None
+    assert devices.updated_payload["gps_fix"] is True
+    assert devices.updated_payload["setup_nonce"] == PAIRING_NONCE
+    assert "battery_level" not in devices.updated_payload
 
 
 def test_invalid_device_secret_returns_401() -> None:

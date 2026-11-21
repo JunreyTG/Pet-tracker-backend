@@ -14,4 +14,8 @@ class Routes {
   static const geofenceForm = '/geofence-form';
   static const alerts = '/alerts';
   static const profile = '/profile';
+  static const settings = '/settings';
+  static const accountProfile = '/settings/profile';
+  static const changePassword = '/settings/password';
+  static const emailSettings = '/settings/email';
 }

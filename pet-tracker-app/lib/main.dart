@@ -6,21 +6,28 @@ import 'package:get/get.dart';
 
 import 'app/bindings/initial_binding.dart';
 import 'app/routes/app_pages.dart';
+import 'app/theme/app_preferences.dart';
 import 'app/theme/app_theme.dart';
 import 'core/services/notification_service.dart';
 import 'features/auth/controllers/auth_controller.dart';
+import 'features/auth/views/email_settings_screen.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
-    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
     if (!kIsWeb) {
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     }
   } catch (e) {
     debugPrint('Firebase init skipped or failed: $e');
   }
+  try {
+    await AppPreferences.load();
+  } catch (_) {}
   runApp(const PetTrackerApp());
 }
 
@@ -29,15 +36,17 @@ class PetTrackerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GetMaterialApp(
-      title: 'Pet Tracker',
-      debugShowCheckedModeBanner: false,
-      initialBinding: InitialBinding(),
-      theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
-      themeMode: ThemeMode.system,
-      getPages: AppPages.pages,
-      home: const AuthGate(),
+    return Obx(
+      () => GetMaterialApp(
+        title: 'Pet Tracker',
+        debugShowCheckedModeBanner: false,
+        initialBinding: InitialBinding(),
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: AppPreferences.themeMode.value,
+        getPages: AppPages.pages,
+        home: const AuthGate(),
+      ),
     );
   }
 }
@@ -51,6 +60,9 @@ class AuthGate extends StatelessWidget {
     return Obx(() {
       if (auth.initializing.value) {
         return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      }
+      if (auth.backendUser.value?.emailVerificationRequired == true) {
+        return const EmailSettingsScreen();
       }
       return auth.isAuthenticated ? AppPages.homeScreen : AppPages.loginScreen;
     });

@@ -1,11 +1,15 @@
+import 'dart:async';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:get/get.dart';
 
 import '../../app/routes/app_routes.dart';
+import '../../app/theme/app_preferences.dart';
 import '../../data/repositories/repositories.dart';
 import '../utils/navigation_args.dart';
+import '../../features/home/controllers/app_data_controller.dart';
 
 final FlutterLocalNotificationsPlugin _localNotifications =
     FlutterLocalNotificationsPlugin();
@@ -28,6 +32,21 @@ class NotificationService extends GetxService {
   NotificationService(this._repository);
   final NotificationRepository _repository;
   String? _registeredTokenId;
+  StreamSubscription<String>? _tokenRefresh;
+  StreamSubscription<RemoteMessage>? _foreground;
+  StreamSubscription<RemoteMessage>? _opened;
+  int _session = 0;
+
+  void clearSession() {
+    _session++;
+    _tokenRefresh?.cancel();
+    _foreground?.cancel();
+    _opened?.cancel();
+    _tokenRefresh = null;
+    _foreground = null;
+    _opened = null;
+    _registeredTokenId = null;
+  }
 
   String get _platformName {
     if (kIsWeb) return 'android';
@@ -63,15 +82,19 @@ class NotificationService extends GetxService {
 
       final androidPlugin = _localNotifications
           .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>();
+            AndroidFlutterLocalNotificationsPlugin
+          >();
       await androidPlugin?.createNotificationChannel(_alertsChannel);
-      debugPrint('Local notifications channel "pet_tracker_alerts" initialized.');
+      debugPrint(
+        'Local notifications channel "pet_tracker_alerts" initialized.',
+      );
     } catch (e) {
       debugPrint('Error initializing local notifications: $e');
     }
   }
 
   Future<void> registerCurrentDevice() async {
+    final session = ++_session;
     try {
       if (kIsWeb) {
         debugPrint('FCM push notifications: Web browser environment detected.');
@@ -97,28 +120,33 @@ class NotificationService extends GetxService {
       );
 
       final token = await messaging.getToken();
-      if (token == null) {
+      if (token == null || session != _session) {
         debugPrint('FCM: Could not obtain FCM token.');
         return;
       }
-      debugPrint('FCM: Token obtained: ${token.substring(0, 15)}...');
-      _registeredTokenId = await _repository.register(
-        token,
-        _platformName,
-        _deviceName,
-      );
-      debugPrint('FCM: Registered with backend as token_id: $_registeredTokenId');
-
-      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-        debugPrint('FCM: Token refreshed.');
-        _registeredTokenId = await _repository.register(
-          newToken,
-          _platformName,
-          _deviceName,
-        );
+      final id = await _repository.register(token, _platformName, _deviceName);
+      if (session != _session) return;
+      _registeredTokenId = id;
+      _tokenRefresh?.cancel();
+      _foreground?.cancel();
+      _opened?.cancel();
+      _tokenRefresh = messaging.onTokenRefresh.listen((newToken) async {
+        if (session != _session) return;
+        try {
+          final refreshed = await _repository.register(
+            newToken,
+            _platformName,
+            _deviceName,
+          );
+          if (session == _session) _registeredTokenId = refreshed;
+        } catch (_) {}
       });
-      FirebaseMessaging.onMessage.listen((message) => _showForeground(message));
-      FirebaseMessaging.onMessageOpenedApp.listen(_navigateFromMessage);
+      _foreground = FirebaseMessaging.onMessage.listen((message) {
+        if (session == _session) _showForeground(message);
+      });
+      _opened = FirebaseMessaging.onMessageOpenedApp.listen((message) {
+        if (session == _session) _navigateFromMessage(message);
+      });
     } catch (e) {
       debugPrint('FCM registration warning: $e');
     }
@@ -137,15 +165,21 @@ class NotificationService extends GetxService {
   }
 
   Future<void> _showForeground(RemoteMessage message) async {
+    if (Get.isRegistered<AppDataController>()) {
+      unawaited(Get.find<AppDataController>().refreshAll(silent: true));
+    }
     final notification = message.notification;
     final title = notification?.title ?? message.data['title'] ?? 'Pet Alert';
     final body =
-        notification?.body ?? message.data['message'] ?? 'Open alerts for details.';
+        notification?.body ??
+        message.data['message'] ??
+        'Open alerts for details.';
 
     if (!kIsWeb) {
       try {
         await _localNotifications.show(
-          id: notification?.hashCode ??
+          id:
+              notification?.hashCode ??
               DateTime.now().millisecondsSinceEpoch.remainder(100000),
           title: title,
           body: body,
@@ -173,22 +207,26 @@ class NotificationService extends GetxService {
       }
     }
 
-    Get.snackbar(
-      title,
-      body,
-      snackPosition: SnackPosition.TOP,
-      duration: const Duration(seconds: 4),
-    );
+    if (AppPreferences.showAlertBanners.value) {
+      Get.snackbar(
+        title,
+        body,
+        snackPosition: SnackPosition.TOP,
+        duration: const Duration(seconds: 4),
+      );
+    }
   }
 
   void _navigateFromMessage(RemoteMessage message) {
     final data = message.data;
     if (data['alert_id'] != null) {
       Get.toNamed(Routes.alerts);
+      return;
     }
     final petId = asIdString(data['pet_id']);
     if (petId != null) {
       Get.toNamed(Routes.petDetails, arguments: petId);
+      return;
     }
     final deviceId = asIdString(data['device_id']);
     if (deviceId != null) {
