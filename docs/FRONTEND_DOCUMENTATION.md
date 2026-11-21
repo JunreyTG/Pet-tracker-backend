@@ -30,7 +30,7 @@
    - [4.8 Pet Management (`My Pet`, `Add/Edit Pet` with Photo Upload, `Pet Details`)](#48-pet-management-my-pet-addedit-pet-with-photo-upload-pet-details)
    - [4.9 Safe Zone Geo-Fencing & Full-Screen Interactive Map Editor](#49-safe-zone-geo-fencing--full-screen-interactive-map-editor)
    - [4.10 Collar Management, Tracker Details & Assign Pet Workflow](#410-collar-management-tracker-details--assign-pet-workflow)
-   - [4.11 ESP32 Hardware Wi-Fi Setup (`DeviceWifiSetupScreen`)](#411-esp32-hardware-wi-fi-setup-devicewifisetupscreen)
+   - [4.11 Link a Tracker by Package ID (`DeviceLinkScreen`)](#411-link-a-tracker-by-package-id-devicelinkscreen)
    - [4.12 Activity Status & Real-Time Alerts Inbox (`AlertsScreen`)](#412-activity-status--real-time-alerts-inbox-alertsscreen)
    - [4.13 Account Menu & Explicit Sign-Out (`ProfileScreen`)](#413-account-menu--explicit-sign-out-profilescreen)
 5. [Core Technical Architecture & Services](#5-core-technical-architecture--services)
@@ -101,7 +101,7 @@ pet-tracker-app/
 │   │   │   └── views/
 │   │   │       ├── devices_screen.dart           # Collar Management list
 │   │   │       ├── device_details_screen.dart    # Hardware status & Assign Pet workflow
-│   │   │       └── device_wifi_setup_screen.dart # High-contrast ESP32 Wi-Fi setup screen
+│   │   │       └── device_link_screen.dart       # Link by printed tracker ID
 │   │   ├── geofences/
 │   │   │   └── views/
 │   │   │       ├── geofences_screen.dart         # Safe Zone list & instant toggle switches
@@ -332,23 +332,20 @@ Defined in [`lib/app/theme/app_theme.dart`](../pet-tracker-app/lib/app/theme/app
 #### UI Specifications & Manual
 1. **Collar Management (`13_devices_list.png`):**
    - Lists all registered ESP32 hardware collars (`ESP32_1790575298381`) with connectivity status (`online` / `offline`) and battery level (`90%`).
-   - Top-right AppBar provides quick icons for **Setup Tracker WiFi (`((•))`)** and **Register New Collar (`+`)**.
+   - Tap **Add Device (`+`)** to link a tracker by ID.
 2. **Tracker Details & Assigned Pet Container (`14_device_details_assign_pet.png`):**
    - **Hardware Status Header:** Displays the tracker ID, connectivity status badge, battery badge, last seen timestamp, and last known GPS coordinates.
    - **Redesigned Assigned Pet Container:** Clean, bordered card displaying the linked pet's photo avatar, green `ASSIGNED PET` pill badge, pet name (`Goerge`), and breed (`Cat • Persian`), along with action buttons to **Change Pet / Assign Tracker to Pet** (opening a pet selector bottom sheet with pet avatars) or **Unassign** the collar.
-   - **Bottom Actions:** Direct shortcuts to **Setup Tracker WiFi** and **Track Location**.
+   - **Track Location** opens the live map.
 
 ---
 
-### 4.11 ESP32 Hardware Wi-Fi Setup (`DeviceWifiSetupScreen`)
-**File:** [`lib/features/devices/views/device_wifi_setup_screen.dart`](../pet-tracker-app/lib/features/devices/views/device_wifi_setup_screen.dart)
+### 4.11 Link a Tracker by Package ID (`DeviceLinkScreen`)
+**File:** [`lib/features/devices/views/device_link_screen.dart`](../pet-tracker-app/lib/features/devices/views/device_link_screen.dart)
 
-See the [ESP32-C3 firmware and pairing guide](../firmware/README.md) for wiring, firmware upload, and setup troubleshooting.
-
-1. **Prepare the tracker** while online: enter its `PT-…` code from Serial Monitor, choose its pet, and save the one-time recovery key privately.
-2. **Verify the hotspot:** join `PetTracker-…` with the board's setup password. The app checks `/api/status` for matching firmware and tracker identity before sending any credentials.
-3. **Set Wi-Fi:** enter the hotspot password and the 2.4 GHz network details. The native app sends them to `http://192.168.4.1/config`; the hosted web app shows instructions instead.
-4. **Confirm through the cloud:** reconnect the phone to the internet. The app polls for the device report associated with this setup attempt and distinguishes **Online, waiting for GPS** from **GPS reporting**. Battery can be absent on this hardware.
+1. **Create a pet.** The app opens the tracker ID screen. You can also link later from **Collars → Add Device**.
+2. **Enter the `PT-…` ID printed on the package** and tap **Connect Device**. The backend saves the tracker to your account and links it to your pet, even if the hardware is offline.
+3. **Check the status.** The app distinguishes **Waiting for the tracker to report**, **Online · waiting for GPS**, and **Online · GPS reporting**. The phone doesn't need to connect to the tracker or share its Wi-Fi network. See the [firmware guide](../firmware/README.md) for hardware configuration.
 
 ---
 

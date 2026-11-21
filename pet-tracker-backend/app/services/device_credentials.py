@@ -14,6 +14,17 @@ def generate_device_secret() -> str:
     return secrets.token_urlsafe(SECRET_BYTES)
 
 
+def derive_factory_device_secret(device_id: str, factory_key: str) -> str:
+    """Derive a per-unit reporting credential without creating a database record."""
+    return hmac.new(
+        factory_key.encode("utf-8"), f"pet-tracker:report:v1:{device_id}".encode("ascii"), hashlib.sha256
+    ).hexdigest()
+
+
+def verify_factory_device_secret(secret: str, device_id: str, factory_key: str) -> bool:
+    return hmac.compare_digest(secret.encode("utf-8"), derive_factory_device_secret(device_id, factory_key).encode("ascii"))
+
+
 def hash_device_secret(secret: str) -> str:
     salt = secrets.token_bytes(SALT_BYTES)
     digest = hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), salt, PBKDF2_ITERATIONS)

@@ -12,6 +12,7 @@ env/
 credentials/
 credentials/*.json
 firebase-service-account.json
+firmware/PetTracker/TrackerConfig.h
 
 .pytest_cache/
 .coverage

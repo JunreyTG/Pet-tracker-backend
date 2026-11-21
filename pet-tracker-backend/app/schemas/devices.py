@@ -4,7 +4,7 @@ from pydantic import Field, field_validator
 
 from app.models.entities import DeviceStatus, FirestoreModel, Location
 
-PT_DEVICE_ID_PATTERN = r"^PT-[0-9A-F]{12}$"
+PT_DEVICE_ID_PATTERN = r"^PT-([0-9A-F]{12}|[0-9A-F]{32})$"
 
 
 class DeviceRegisterRequest(FirestoreModel):
@@ -15,10 +15,6 @@ class DeviceRegisterRequest(FirestoreModel):
     @classmethod
     def trim_name(cls, name: str | None) -> str | None:
         return name.strip() if isinstance(name, str) else name
-
-
-class DeviceProvisioningRequest(DeviceRegisterRequest):
-    backend_url: str | None = Field(default=None, min_length=1)
 
 
 class DeviceAssignRequest(FirestoreModel):
@@ -56,11 +52,3 @@ class DeviceResponse(FirestoreModel):
 
 class DeviceRegistrationResponse(DeviceResponse):
     device_secret: str
-
-
-class DeviceProvisioningResponse(DeviceRegistrationResponse):
-    backend_url: str
-    telemetry_path: str
-    telemetry_url: str
-    setup_hotspot_ssid: str
-    setup_url: str | None = None

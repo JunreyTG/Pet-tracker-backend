@@ -172,74 +172,42 @@ class DeviceModel {
     required this.id,
     required this.deviceId,
     this.name,
-    this.preconfigured = false,
     this.petId,
     required this.status,
     this.batteryLevel,
     this.currentLocation,
     this.lastSeen,
     this.lastLocationUpdate,
-    this.setupNonce,
     this.gpsFix,
     required this.lowBatteryAlertActive,
-    this.deviceSecret,
   });
   final String id;
   final String deviceId;
   final String? name;
-  final bool preconfigured;
   final String? petId;
   final String status;
   final int? batteryLevel;
   final LocationModel? currentLocation;
   final DateTime? lastSeen;
   final DateTime? lastLocationUpdate;
-  final String? setupNonce;
   final bool? gpsFix;
   final bool lowBatteryAlertActive;
-  final String? deviceSecret;
   bool get hasLocation => currentLocation != null;
   factory DeviceModel.fromJson(Map<String, dynamic> json) => DeviceModel(
     id: json['id']?.toString() ?? json['device_id']?.toString() ?? '',
     deviceId: json['device_id']?.toString() ?? '',
     name: json['name'] as String?,
-    preconfigured: json['preconfigured'] == true,
     petId: json['pet_id']?.toString(),
     status: json['status']?.toString() ?? 'unregistered',
     batteryLevel: parseIntOrNull(json['battery_level']),
     currentLocation: parseLocationOrNull(json['current_location']),
     lastSeen: parseDate(json['last_seen']),
     lastLocationUpdate: parseDate(json['last_location_update']),
-    setupNonce: json['setup_nonce']?.toString(),
     gpsFix: json['gps_fix'] is bool ? json['gps_fix'] as bool : null,
     lowBatteryAlertActive: json['low_battery_alert_active'] is bool
         ? json['low_battery_alert_active'] as bool
         : false,
-    deviceSecret: json['device_secret']?.toString(),
   );
-}
-
-class DeviceProvisioningModel {
-  DeviceProvisioningModel({
-    required this.deviceId,
-    required this.deviceSecret,
-    required this.backendUrl,
-    required this.telemetryUrl,
-    required this.setupHotspotSsid,
-  });
-  final String deviceId;
-  final String deviceSecret;
-  final String backendUrl;
-  final String telemetryUrl;
-  final String setupHotspotSsid;
-  factory DeviceProvisioningModel.fromJson(Map<String, dynamic> json) =>
-      DeviceProvisioningModel(
-        deviceId: json['device_id'] ?? '',
-        deviceSecret: json['device_secret'] ?? '',
-        backendUrl: json['backend_url'] ?? '',
-        telemetryUrl: json['telemetry_url'] ?? '',
-        setupHotspotSsid: json['setup_hotspot_ssid'] ?? '',
-      );
 }
 
 class GeofenceModel {

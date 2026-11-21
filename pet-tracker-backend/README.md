@@ -166,13 +166,13 @@ Valid device telemetry triggers geofence checks for all enabled geofences assign
 
 Alerts and FCM delivery are handled by later alert/notification services; geofence evaluation itself only returns transition results.
 
-## Link a Preconfigured Tracker by ID
+## Link a Tracker by Package ID
 
-For trackers built with their own Wi-Fi setup, the app links the tracker through the cloud. The phone can use mobile data or a different Wi-Fi network.
+Create a pet, enter the `PT-…` ID printed on the tracker package, and tap **Connect Device**. The app sends the tracker ID and pet ID to `POST /api/v1/devices/claim`. If the device record does not exist, the backend creates it and links it to the pet in one Firestore transaction. No advance enrollment is needed, and the tracker can be offline when the user links it. An ID already owned by another account is unavailable.
 
-1. As the operator, run `python -m app.enroll_tracker PT-3C9814AFD750` from `pet-tracker-backend/` with the target project's Firebase credentials. Substitute the ID you chose and embedded in the device. Use unique, randomly chosen IDs and share each ID only with its intended owner before linking.
-2. Configure the tracker with that exact ID, the printed **device secret**, and the backend HTTPS URL. The tracker should send authenticated `POST /api/v1/device/heartbeat` or `POST /api/v1/device/telemetry` reports and retry if it receives `409` while awaiting a pet assignment. Wi-Fi connectivity alone does not send these reports. The secret is stored on the hardware and never returned to the app's ID-linking flow.
-3. In the app, create a pet, enter the tracker ID and tap **Connect Device**. The app calls `POST /api/v1/devices/claim` with the ID and the pet's ID. It shows the tracker as linked once the backend assigns it, and online after a recent report arrives.
+Live tracking starts after the device sends an authenticated heartbeat or GPS report. To prepare new hardware, set a dedicated, random `TRACKER_FACTORY_KEY` (at least 32 characters) in the backend and the local manufacturing environment. `python -m app.make_tracker_identity` generates a random package ID and a distinct reporting secret for the unit. It does not contact Firebase or write to the database. Print only the ID on the package and keep it private until linking; the first account to enter it claims it. Flash the per-unit secret into the tracker, never the factory key. Existing devices with a stored credential hash continue to use their original secret.
+
+See the [firmware guide](../firmware/README.md) for flashing and setting up the tracker's own internet connection.
 
 ## Email Verification and Alerts
 

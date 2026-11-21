@@ -1,16 +1,12 @@
-import re
 from typing import Any
-from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.models.auth import AuthenticatedUser
 from app.models.entities import Device
 from app.schemas.devices import (
     DeviceAssignRequest,
     DeviceClaimRequest,
-    DeviceProvisioningRequest,
-    DeviceProvisioningResponse,
     DeviceRegisterRequest,
     DeviceRegistrationResponse,
     DeviceResponse,
@@ -26,8 +22,6 @@ from app.services.device_service import (
 )
 
 router = APIRouter(prefix="/api/v1/devices", tags=["devices"])
-TELEMETRY_PATH = "/api/v1/device/telemetry"
-ESP32_ID = re.compile(r"PT-[0-9A-F]{12}")
 
 
 def _device_payload(device: Device) -> dict[str, Any]:
@@ -37,21 +31,6 @@ def _device_payload(device: Device) -> dict[str, Any]:
 def _registration_payload(registration: DeviceRegistration) -> dict[str, Any]:
     payload = _device_payload(registration.device)
     payload["device_secret"] = registration.device_secret
-    return payload
-
-
-def _provisioning_payload(registration: DeviceRegistration, backend_url: str) -> dict[str, Any]:
-    clean_backend_url = backend_url.rstrip("/")
-    payload = _registration_payload(registration)
-    payload["backend_url"] = clean_backend_url
-    payload["telemetry_path"] = TELEMETRY_PATH
-    payload["telemetry_url"] = f"{clean_backend_url}{TELEMETRY_PATH}"
-    device_id = registration.device.device_id
-    if ESP32_ID.fullmatch(device_id):
-        payload["setup_hotspot_ssid"] = f"PetTracker-{device_id[-6:]}"
-        payload["setup_url"] = "http://192.168.4.1/config"
-    else:
-        payload["setup_hotspot_ssid"] = f"PET_TRACKER_SETUP_{device_id}"
     return payload
 
 
@@ -79,40 +58,7 @@ def register_device(
     try:
         return _registration_payload(device_service.register_device(current_user.uid, data))
     except DeviceConflictError as exc:
-        raise _conflict("Device is already registered.") from exc
-    except DeviceServiceError as exc:
-        raise _unavailable() from exc
-
-
-@router.post("/setup", response_model=DeviceProvisioningResponse, status_code=status.HTTP_201_CREATED)
-def create_device_provisioning(
-    data: DeviceProvisioningRequest,
-    request: Request,
-    current_user: AuthenticatedUser = Depends(get_current_user),
-    device_service: DeviceService = Depends(get_device_service),
-) -> dict[str, Any]:
-    try:
-        backend_url = data.backend_url or str(request.base_url)
-        if ESP32_ID.fullmatch(data.device_id):
-            try:
-                parsed = urlsplit(backend_url)
-                valid = (
-                    parsed.scheme == "https" and parsed.hostname
-                    and parsed.path in ("", "/") and not parsed.username
-                    and not parsed.password and "@" not in parsed.netloc
-                    and "?" not in backend_url and "#" not in backend_url
-                    and parsed.port in (None, 443)
-                )
-            except ValueError:
-                valid = False
-            if not valid:
-                raise HTTPException(status_code=422, detail="An HTTPS backend origin is required for ESP32-C3 setup.")
-        registration = device_service.register_device(
-            current_user.uid, DeviceRegisterRequest(device_id=data.device_id, name=data.name)
-        )
-        return _provisioning_payload(registration, backend_url)
-    except DeviceConflictError as exc:
-        raise _conflict("Device is already registered. Use the saved device secret or register a new tracker ID.") from exc
+        raise _conflict(str(exc)) from exc
     except DeviceServiceError as exc:
         raise _unavailable() from exc
 

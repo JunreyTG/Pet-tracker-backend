@@ -7,7 +7,6 @@ class Routes {
   static const addPet = '/add-pet';
   static const devices = '/devices';
   static const deviceDetails = '/device-details';
-  static const deviceWifiSetup = '/device-wifi-setup';
   static const deviceLink = '/device-link';
   static const tracking = '/tracking';
   static const mapFocus = '/map-focus';

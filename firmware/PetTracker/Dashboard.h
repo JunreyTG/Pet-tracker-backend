@@ -31,7 +31,7 @@ static const char Dashboard[] PROGMEM = R"HTML(<!doctype html>
  <section>
   <strong>Local Home zone</strong>
   <p class="help">This setting applies to this tracker only. Manage app safe zones separately.</p>
-  <label for="key">Setup hotspot password</label><input id="key" type="password" autocomplete="off">
+  <label for="key">Local dashboard key</label><input id="key" type="password" autocomplete="off">
   <div><button id="home">Set Home to current position</button></div>
   <label for="radius">Safe radius (meters)</label><input id="radius" type="number" min="10" max="5000" step="1"> <button id="save">Save radius</button>
   <div id="result" role="status"></div>
@@ -104,7 +104,7 @@ async function refresh(){
 }
 async function edit(path){
  const key=$('key').value;
- if(!key){$('result').textContent='Enter your tracker setup password.';return;}
+ if(!key){$('result').textContent='Enter your local dashboard key.';return;}
  try{
   const r=await fetch(path,{method:'POST',headers:{'X-Tracker-Key':key},signal:AbortSignal.timeout(4500)});
   $('result').textContent=await r.text();

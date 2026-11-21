@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     device_offline_threshold_seconds: int = Field(default=300, gt=0)
     device_heartbeat_check_interval_seconds: int = Field(default=60, gt=0)
     device_offline_check_secret: str | None = Field(default=None, min_length=32)
+    tracker_factory_key: SecretStr | None = Field(default=None, min_length=32)
     low_battery_threshold_percent: int = Field(default=20, ge=0, le=100)
     brevo_api_key: SecretStr | None = None
     alert_email_from: EmailStr | None = None

@@ -45,9 +45,10 @@ class _DeviceLinkScreenState extends State<DeviceLinkScreen> {
   Future<void> _link(String? petId) async {
     if (_busy || petId == null) return;
     final code = _code.text.trim().toUpperCase();
-    if (!RegExp(r'^PT-[0-9A-F]{12}$').hasMatch(code)) {
+    if (!RegExp(r'^PT-([0-9A-F]{12}|[0-9A-F]{32})$').hasMatch(code)) {
       setState(
-        () => _error = 'Enter PT- followed by 12 characters (0–9 or A–F).',
+        () => _error =
+            'Check the tracker ID on the package and enter it in full.',
       );
       return;
     }
@@ -70,7 +71,7 @@ class _DeviceLinkScreenState extends State<DeviceLinkScreen> {
       if (mounted) {
         setState(
           () => _error = e.statusCode == 404
-              ? 'Tracker not available. Check the ID and make sure the tracker was enrolled.'
+              ? 'This tracker or pet is unavailable for your account. Check the ID and try again.'
               : e.message,
         );
       }
@@ -138,7 +139,7 @@ class _DeviceLinkScreenState extends State<DeviceLinkScreen> {
                         ? device.gpsFix == true
                               ? 'Online · GPS reporting'
                               : 'Online · waiting for GPS'
-                        : 'Waiting for the tracker to report. Make sure it has Wi-Fi internet.',
+                        : 'Waiting for the tracker to report. You can leave this screen and check again later.',
                   ),
                   const SizedBox(height: 16),
                   FilledButton(
@@ -156,13 +157,13 @@ class _DeviceLinkScreenState extends State<DeviceLinkScreen> {
                 ] else ...[
                   Text(
                     fixed == null
-                        ? 'Link a Wi-Fi tracker'
+                        ? 'Link a tracker'
                         : 'Link a tracker to ${fixed.name}',
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Enter the ID that came with the tracker. Your phone can use Wi-Fi or mobile data.',
+                    'Enter the tracker ID printed on the device package.',
                   ),
                   const SizedBox(height: 16),
                   if (fixed == null && available.isEmpty)
@@ -193,8 +194,8 @@ class _DeviceLinkScreenState extends State<DeviceLinkScreen> {
                     textCapitalization: TextCapitalization.characters,
                     autocorrect: false,
                     decoration: const InputDecoration(
-                      labelText: 'Device ID',
-                      hintText: 'PT- followed by 12 characters',
+                      labelText: 'Tracker ID',
+                      hintText: 'PT-…',
                     ),
                     onSubmitted: (_) => _link(petId),
                   ),

@@ -4,13 +4,15 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from firebase_admin import firestore
+from pydantic import SecretStr
 
+from app.core.config import settings
 from app.main import app
 from app.models.auth import AuthenticatedUser
 from app.models.entities import Device, DeviceCreate, DeviceStatus, DeviceUpdate, Pet
 from app.schemas.devices import DeviceRegisterRequest
 from app.services.auth_service import get_current_user
-from app.services.device_credentials import hash_device_secret, verify_device_secret
+from app.services.device_credentials import derive_factory_device_secret, hash_device_secret, verify_device_secret
 from app.services.device_service import (
     DeviceAuthenticationError,
     DeviceAuthenticationService,
@@ -119,14 +121,22 @@ class FakeCollection:
 
 class FakeBatch:
     def __init__(self) -> None:
-        self.updates: list[tuple[FakeDocumentRef, dict[str, Any]]] = []
+        self.writes: list[tuple[str, FakeDocumentRef, dict[str, Any]]] = []
+
+    def create(self, ref: FakeDocumentRef, payload: dict[str, Any]) -> None:
+        self.writes.append(("create", ref, payload))
 
     def update(self, ref: FakeDocumentRef, payload: dict[str, Any]) -> None:
-        self.updates.append((ref, payload))
+        self.writes.append(("update", ref, payload))
 
     def commit(self) -> None:
-        for ref, payload in self.updates:
-            ref.apply_update(payload)
+        for operation, ref, payload in self.writes:
+            if operation == "create":
+                assert ref.repository.get(ref.document_id) is None
+                data = {key: value for key, value in payload.items() if value is not firestore.SERVER_TIMESTAMP}
+                ref.repository.create(DeviceCreate.model_validate(data))
+            else:
+                ref.apply_update(payload)
 
 
 class FakeClient:
@@ -216,31 +226,69 @@ def fake_device_api_service() -> FakeDeviceApiService:
     return service
 
 
-def test_cloud_claim_requires_existing_inventory_and_keeps_device_credentials_private(fake_device_api_service) -> None:
+@pytest.mark.parametrize("tracker_id", ["PT-3C9814AFD750", "PT-0123456789ABCDEF0123456789ABCDEF"])
+def test_package_id_creates_and_links_tracker_without_enrollment(fake_device_api_service, tracker_id) -> None:
     devices = FakeDeviceRepository()
     pets = FakePetRepository()
     service = DeviceService(device_repository=devices, pet_repository=pets)
     app.dependency_overrides[get_device_service] = lambda: service
-    tracker_id = "PT-3C9814AFD750"
-    request = {"device_id": tracker_id.lower(), "pet_id": "pet-1"}
+    request = {"device_id": f" {tracker_id.lower()} ", "pet_id": "pet-1"}
 
-    assert client.post("/api/v1/devices/claim", json=request).status_code == 404
-    enrolled = service.register_device(UNCLAIMED_TRACKER_OWNER, DeviceRegisterRequest(device_id=tracker_id))
+    assert client.post("/api/v1/devices/claim", json={**request, "device_id": "PT-INVALID"}).status_code == 422
     assert client.post("/api/v1/devices/claim", json={**request, "pet_id": "pet-3"}).status_code == 404
-    assert devices.get(tracker_id).owner_id == UNCLAIMED_TRACKER_OWNER
+    assert client.post("/api/v1/devices/claim", json={**request, "pet_id": "pet-2"}).status_code == 409
+    assert devices.get(tracker_id) is None
     response = client.post("/api/v1/devices/claim", json=request)
     assert response.status_code == 200
     body = response.json()
     assert body["device_id"] == tracker_id and body["pet_id"] == "pet-1"
     assert body["preconfigured"] and body["status"] == "unregistered"
     assert "device_secret" not in body and "device_secret_hash" not in body
+    assert devices.get(tracker_id).owner_id == "owner-1"
+    assert devices.get(tracker_id).device_secret_hash is None
     assert pets.get("pet-1").device_id == tracker_id
     assert client.post("/api/v1/devices/claim", json=request).status_code == 200
     with pytest.raises(DeviceNotFoundError):
         service.claim_device("owner-2", tracker_id, "pet-3")
+    assert pets.get("pet-3").device_id is None
+
+
+def test_legacy_inventory_claim_preserves_old_reporting_credential() -> None:
+    devices = FakeDeviceRepository()
+    tracker_id = "PT-3C9814AFD750"
+    devices.create(DeviceCreate(
+        device_id=tracker_id, owner_id=UNCLAIMED_TRACKER_OWNER, preconfigured=True,
+        device_secret_hash=hash_device_secret("old-secret"),
+    ))
+    service = DeviceService(device_repository=devices, pet_repository=FakePetRepository())
+    assert service.claim_device("owner-1", tracker_id, "pet-1").owner_id == "owner-1"
     assert DeviceAuthenticationService(device_repository=devices).verify_device_credentials(
-        tracker_id, enrolled.device_secret
+        tracker_id, "old-secret"
     ).pet_id == "pet-1"
+
+
+def test_linked_tracker_requires_its_private_reporting_credential(monkeypatch) -> None:
+    devices = FakeDeviceRepository()
+    tracker_id = "PT-3C9814AFD750"
+    key = "test-factory-key-only-for-this-test"
+    credential = derive_factory_device_secret(tracker_id, key)
+    monkeypatch.setattr(settings, "tracker_factory_key", SecretStr(key))
+    auth = DeviceAuthenticationService(device_repository=devices)
+    with pytest.raises(DeviceAuthenticationError):
+        auth.verify_device_credentials(tracker_id, credential)
+    DeviceService(device_repository=devices, pet_repository=FakePetRepository()).claim_device(
+        "owner-1", tracker_id, "pet-1"
+    )
+    for invalid in (None, tracker_id, derive_factory_device_secret("PT-000000000001", key)):
+        with pytest.raises(DeviceAuthenticationError):
+            auth.verify_device_credentials(tracker_id, invalid)
+    assert auth.verify_device_credentials(tracker_id, credential).pet_id == "pet-1"
+
+
+def test_package_ids_can_only_be_linked_through_claim() -> None:
+    service = DeviceService(device_repository=FakeDeviceRepository(), pet_repository=FakePetRepository())
+    with pytest.raises(DeviceConflictError, match="Link this tracker ID"):
+        service.register_device("owner-1", DeviceRegisterRequest(device_id=" pt-3c9814afd750 "))
 
 
 def test_unauthenticated_registration_returns_401() -> None:
@@ -276,40 +324,6 @@ def test_device_secret_is_generated_and_hash_is_not_returned(fake_device_api_ser
 
     assert body["device_secret"] == "raw-secret"
     assert "device_secret_hash" not in body
-
-
-def test_authenticated_user_can_create_device_provisioning(fake_device_api_service: FakeDeviceApiService) -> None:
-    response = client.post(
-        "/api/v1/devices/setup",
-        json={"device_id": "PET-ESP32-010", "backend_url": "http://192.168.1.10:8000"},
-    )
-    body = response.json()
-
-    assert response.status_code == 201
-    assert body["device_id"] == "PET-ESP32-010"
-    assert body["device_secret"] == "raw-secret"
-    assert body["backend_url"] == "http://192.168.1.10:8000"
-    assert body["telemetry_path"] == "/api/v1/device/telemetry"
-    assert body["telemetry_url"] == "http://192.168.1.10:8000/api/v1/device/telemetry"
-    assert body["setup_hotspot_ssid"] == "PET_TRACKER_SETUP_PET-ESP32-010"
-    assert "device_secret_hash" not in body
-
-
-def test_c3_provisioning_returns_matching_hotspot(fake_device_api_service: FakeDeviceApiService) -> None:
-    payload = {"device_id": "PT-012345ABCDEF", "backend_url": "https://backend.example", "name": "  Milo’s Tracker  "}
-    response = client.post("/api/v1/devices/setup", json=payload)
-    assert response.status_code == 201
-    assert response.json()["setup_hotspot_ssid"] == "PetTracker-ABCDEF"
-    assert response.json()["setup_url"] == "http://192.168.4.1/config"
-    assert response.json()["name"] == "Milo’s Tracker"
-    response = client.post("/api/v1/devices/setup", json={**payload, "backend_url": "http://backend.example"})
-    assert response.status_code == 422
-
-
-def test_duplicate_device_provisioning_returns_409(fake_device_api_service: FakeDeviceApiService) -> None:
-    response = client.post("/api/v1/devices/setup", json={"device_id": "duplicate-device"})
-
-    assert response.status_code == 409
 
 
 def test_duplicate_device_registration_returns_409(fake_device_api_service: FakeDeviceApiService) -> None:

@@ -21,14 +21,6 @@ class DevicesScreen extends StatelessWidget {
             tooltip: 'Add Device',
             onPressed: () => Get.toNamed(Routes.deviceLink),
           ),
-          PopupMenuButton<void>(
-            itemBuilder: (_) => [
-              PopupMenuItem<void>(
-                onTap: () => Get.toNamed(Routes.deviceWifiSetup),
-                child: const Text('Tracker hotspot setup'),
-              ),
-            ],
-          ),
         ],
       ),
       body: Obx(() {

@@ -190,23 +190,6 @@ class DeviceRepository {
   Future<DeviceModel> get(String id) async => DeviceModel.fromJson(
     Map<String, dynamic>.from(await _api.get('/devices/$id')),
   );
-  Future<DeviceModel> register(String id) async => DeviceModel.fromJson(
-    Map<String, dynamic>.from(
-      await _api.post('/devices', body: {'device_id': id}),
-    ),
-  );
-  Future<DeviceProvisioningModel> provision(
-    String id, {
-    required String backendUrl,
-    String? name,
-  }) async => DeviceProvisioningModel.fromJson(
-    Map<String, dynamic>.from(
-      await _api.post(
-        '/devices/setup',
-        body: {'device_id': id, 'backend_url': backendUrl, 'name': ?name},
-      ),
-    ),
-  );
   Future<DeviceModel> assign(String deviceId, String petId) async =>
       DeviceModel.fromJson(
         Map<String, dynamic>.from(

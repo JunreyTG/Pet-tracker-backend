@@ -1,12 +1,19 @@
 import logging
+import re
 from dataclasses import dataclass
 
 from firebase_admin import firestore
 from google.api_core.exceptions import AlreadyExists, GoogleAPIError
 
+from app.core.config import settings
 from app.models.entities import Device, DeviceCreate, DeviceStatus
-from app.schemas.devices import DeviceRegisterRequest
-from app.services.device_credentials import generate_device_secret, hash_device_secret, verify_device_secret
+from app.schemas.devices import PT_DEVICE_ID_PATTERN, DeviceRegisterRequest
+from app.services.device_credentials import (
+    generate_device_secret,
+    hash_device_secret,
+    verify_device_secret,
+    verify_factory_device_secret,
+)
 from app.services.firestore_repositories import DeviceRepository, PetRepository
 
 logger = logging.getLogger(__name__)
@@ -45,6 +52,8 @@ class DeviceService:
         self.pet_repository = pet_repository or PetRepository()
 
     def register_device(self, owner_id: str, data: DeviceRegisterRequest) -> DeviceRegistration:
+        if re.fullmatch(PT_DEVICE_ID_PATTERN, data.device_id.strip().upper()):
+            raise DeviceConflictError("Link this tracker ID to a pet instead.")
         try:
             if self.device_repository.get(data.device_id) is not None:
                 raise DeviceConflictError("Device is already registered.")
@@ -56,7 +65,6 @@ class DeviceService:
                     device_id=data.device_id,
                     name=data.name,
                     owner_id=owner_id,
-                    preconfigured=owner_id == UNCLAIMED_TRACKER_OWNER,
                     pet_id=None,
                     status=DeviceStatus.UNREGISTERED,
                     device_secret_hash=device_secret_hash,
@@ -99,35 +107,46 @@ class DeviceService:
         @firestore.transactional
         def assign(transaction):
             device = self.device_repository.get(device_id, transaction=transaction)
-            if device is None:
+            if device is None and not claim:
                 raise DeviceNotFoundError("Device was not found.")
-            claimable = (
-                claim and device.owner_id == UNCLAIMED_TRACKER_OWNER
-                and device.preconfigured and device.status == DeviceStatus.UNREGISTERED
-                and bool(device.device_secret_hash)
-            )
-            if device.owner_id != owner_id and not claimable:
-                raise DeviceNotFoundError("Device was not found.")
-            if device.pet_id not in (None, pet_id):
-                raise DeviceConflictError("Device is already assigned to another pet.")
+            if device is not None:
+                legacy_unclaimed = (
+                    claim and device.owner_id == UNCLAIMED_TRACKER_OWNER
+                    and device.preconfigured and device.status == DeviceStatus.UNREGISTERED
+                    and bool(device.device_secret_hash)
+                )
+                if device.owner_id != owner_id and not legacy_unclaimed:
+                    raise DeviceNotFoundError("Device was not found.")
+                if device.pet_id not in (None, pet_id):
+                    raise DeviceConflictError("Device is already assigned to another pet.")
 
             pet = self.pet_repository.get(pet_id, transaction=transaction)
             if pet is None or pet.owner_id != owner_id:
                 raise DeviceNotFoundError("Pet was not found.")
             if pet.device_id not in (None, device_id):
                 raise DeviceConflictError("Pet already has a device assigned.")
-            if device.owner_id == owner_id and device.pet_id == pet_id and pet.device_id == device_id:
+            if device is not None and device.owner_id == owner_id and device.pet_id == pet_id and pet.device_id == device_id:
                 return
 
-            transaction.update(self.device_repository.collection.document(device_id), {
-                "owner_id": owner_id, "pet_id": pet_id, "updated_at": firestore.SERVER_TIMESTAMP,
-            })
+            device_ref = self.device_repository.collection.document(device_id)
+            if device is None:
+                data = DeviceCreate(device_id=device_id, owner_id=owner_id, pet_id=pet_id, preconfigured=True)
+                transaction.create(device_ref, {
+                    **data.model_dump(mode="python"),
+                    "created_at": firestore.SERVER_TIMESTAMP, "updated_at": firestore.SERVER_TIMESTAMP,
+                })
+            else:
+                transaction.update(device_ref, {
+                    "owner_id": owner_id, "pet_id": pet_id, "updated_at": firestore.SERVER_TIMESTAMP,
+                })
             transaction.update(self.pet_repository.collection.document(pet_id), {
                 "device_id": device_id, "updated_at": firestore.SERVER_TIMESTAMP,
             })
 
         try:
             assign(self.device_repository.client.transaction())
+        except AlreadyExists as exc:
+            raise DeviceNotFoundError("Device was not found.") from exc
         except GoogleAPIError as exc:
             logger.info("Firestore device assignment failed: %s", exc.__class__.__name__)
             raise DeviceServiceError("Device assignment could not be completed.") from exc
@@ -175,7 +194,20 @@ class DeviceAuthenticationService:
             logger.info("Firestore device credential lookup failed: %s", exc.__class__.__name__)
             raise DeviceServiceError("Device credentials could not be verified.") from exc
 
-        if device is None or device.status == DeviceStatus.DISABLED or not verify_device_secret(device_secret, device.device_secret_hash):
+        if device is None or device.status == DeviceStatus.DISABLED:
+            raise DeviceAuthenticationError("Invalid device credentials.")
+
+        if device.device_secret_hash is not None:
+            valid = verify_device_secret(device_secret, device.device_secret_hash)
+        else:
+            # ID-only claims have no stored secret; legacy credentials always take precedence.
+            factory_key = settings.tracker_factory_key
+            valid = (
+                device.preconfigured and factory_key is not None
+                and re.fullmatch(PT_DEVICE_ID_PATTERN, device.device_id) is not None
+                and verify_factory_device_secret(device_secret, device.device_id, factory_key.get_secret_value())
+            )
+        if not valid:
             raise DeviceAuthenticationError("Invalid device credentials.")
 
         return device

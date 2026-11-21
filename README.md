@@ -28,9 +28,9 @@ Pet_tracker_system/
 
 ## 📖 Detailed Documentation
 
-- **[Backend Technical & API Documentation](docs/BACKEND_DOCUMENTATION.md):** Complete guide to FastAPI endpoints, dual-scheme authentication (Firebase ID Token + PBKDF2 device secrets), Cloud Firestore schemas, Haversine geofencing, heartbeat/offline monitoring, and Firebase Cloud Messaging (FCM).
-- **[Frontend Technical & UI Documentation](docs/FRONTEND_DOCUMENTATION.md):** Guide to Flutter app architecture, GetX state management, OpenStreetMap, GPS trails, and ESP32 Wi-Fi provisioning.
-- **[Tracker Firmware & Pairing Guide](firmware/README.md):** Wiring, Arduino build, tracker hotspot, cloud setup, and local dashboard.
+- **[Backend Technical & API Documentation](docs/BACKEND_DOCUMENTATION.md):** FastAPI endpoints, user and device authentication, Cloud Firestore schemas, geofencing, offline monitoring, and push notifications.
+- **[Frontend Technical & UI Documentation](docs/FRONTEND_DOCUMENTATION.md):** Flutter architecture, GetX state management, OpenStreetMap, GPS trails, and linking a tracker by its package ID.
+- **[Tracker Firmware & Pairing Guide](firmware/README.md):** Wiring, Arduino build, device reporting, and local dashboard.
 
 ---
 

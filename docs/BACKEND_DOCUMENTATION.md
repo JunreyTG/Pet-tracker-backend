@@ -369,7 +369,7 @@ State transition matrix:
 
 ---
 
-### 6.4 Devices Management & Provisioning
+### 6.4 Device Management & ID Linking
 #### `POST /api/v1/devices`
 - **Auth:** Bearer `<Firebase ID Token>`
 - **Request Body:**
@@ -397,16 +397,16 @@ State transition matrix:
   }
   ```
 
-#### `POST /api/v1/devices/setup`
+#### `POST /api/v1/devices/claim`
 - **Auth:** Bearer `<Firebase ID Token>`
 - **Request Body:**
   ```json
   {
-    "device_id": "ESP32_TRACKER_01",
-    "backend_url": "http://192.168.1.100:8000"
+     "device_id": "PT-0123456789ABCDEF0123456789ABCDEF",
+     "pet_id": "pet_auto_id_1"
   }
   ```
-- **Response `201`:** Complete provisioning bundle including setup hotspot SSID (`PET_TRACKER_SETUP_<device_id>`) and full telemetry URL.
+- **Response `200`:** Device owned by the signed-in user and linked to the pet. A new record is created on first use. No device secret is returned. `404` indicates an unavailable tracker or pet; `409` indicates an existing assignment that would be overwritten.
 
 #### `GET /api/v1/devices` & `GET /api/v1/devices/{device_id}`
 - **Auth:** Bearer `<Firebase ID Token>`
