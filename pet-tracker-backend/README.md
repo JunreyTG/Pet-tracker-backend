@@ -168,7 +168,7 @@ Alerts and FCM delivery are handled by later alert/notification services; geofen
 
 ## Email Verification and Alerts
 
-New registrations require a working email address. `POST /api/v1/auth/register` creates the account with `email_verification_required: true`; the client then requests a 16-character verification code through Brevo via `POST /api/v1/auth/email/send`. Until the code is confirmed, the account can call `/api/v1/auth/me` but owner endpoints return `403`, so the client can finish verification.
+Registration and sign-in do not require email verification. Users can optionally verify their address in **Email notifications** to enable email alerts. `POST /api/v1/auth/email/send` requests a 16-character verification code through Brevo.
 
 Configure transactional email with:
 
@@ -177,7 +177,9 @@ BREVO_API_KEY="xkeysib-..."
 ALERT_EMAIL_FROM="alerts@yourdomain.com"
 ```
 
-`ALERT_EMAIL_FROM` must be a bare, verified sender address in Brevo. Emails are sent with the display name `Pet Tracker`. When either value is missing, registration returns `503`.
+`ALERT_EMAIL_FROM` must be a bare, verified sender address in Brevo. Emails are sent with the display name `Pet Tracker`. When either value is missing, requests to send a verification code return `503`.
+
+If sending a code returns `503` and the Vercel runtime logs show a Brevo `403`, check the reported `reason` in the `Email provider rejected a request` log. Confirm that transactional email is enabled and that the sender and key belong to the same Brevo account. If the reason is `ip_not_authorized`, check Brevo's authorized IP settings and allow the backend's stable outbound IP. After changing Vercel production environment variables, redeploy and request a code from the existing account.
 
 ```text
 POST  /api/v1/auth/email/send    # send or resend a verification code (1/min, 5/day)

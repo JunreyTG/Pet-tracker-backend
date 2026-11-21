@@ -99,15 +99,13 @@ class AppDataController extends GetxController with WidgetsBindingObserver {
     final auth = Get.find<AuthController>();
     WidgetsBinding.instance.addObserver(this);
     void sessionChanged(UserModel? user) {
-      final eligibleOwner = user?.emailVerificationRequired == true
-          ? null
-          : user?.uid;
-      if (_sessionOwner == eligibleOwner) return;
-      _sessionOwner = eligibleOwner;
+      final owner = user?.uid;
+      if (_sessionOwner == owner) return;
+      _sessionOwner = owner;
       _sessionGeneration++;
       _refreshInProgress = null;
       _clear();
-      if (eligibleOwner == null) {
+      if (owner == null) {
         _refreshTimer?.cancel();
       } else {
         unawaited(ensureMapFocusLoaded());

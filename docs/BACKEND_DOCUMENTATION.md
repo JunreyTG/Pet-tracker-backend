@@ -288,16 +288,15 @@ State transition matrix:
 
 #### `POST /api/v1/auth/email/verify`
 - **Body:** `{"code": "0123456789ABCDEF"}` (case-insensitive).
-- **Description:** Confirms the email address and clears the verification-required gate. Returns the updated user profile. Invalid, expired, or already-used codes return `400`.
+- **Description:** Confirms the email address so the user can enable optional email alerts. Returns the updated user profile. Invalid, expired, or already-used codes return `400`.
 
 #### `PATCH /api/v1/auth/email/alerts`
 - **Body:** `{"enabled": true}`.
 - **Description:** Opts the verified account in or out of email alerts. Enabling before verification returns `409`. Returns the updated user profile.
 
 #### Registration and verification gate
-- `POST /api/v1/auth/register` returns `201` with a token and `email_verification_required: true`; the client then calls `/api/v1/auth/email/send` to deliver a code. When Brevo is not configured, registration returns `503`.
-- While verification is required, `/api/v1/auth/me` remains available but all other owner endpoints return `403` with a verification message.
-- `CurrentUserResponse` includes `email_verified`, `email_verification_required`, and `email_alerts_enabled`.
+- `POST /api/v1/auth/register` returns `201` with a token and immediate account access. Brevo is only needed for optional email notifications.
+- `CurrentUserResponse` includes `email_verified` and `email_alerts_enabled`; `email_verification_required` is retained as `false` for older clients.
 
 ---
 

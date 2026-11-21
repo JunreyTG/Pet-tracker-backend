@@ -52,7 +52,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Use an email you can access. We’ll send a code to verify your account.',
+                      'Use your email address to sign in.',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     const SizedBox(height: 20),

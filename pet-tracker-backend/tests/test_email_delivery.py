@@ -53,3 +53,22 @@ def test_sample_key_is_not_treated_as_configured(monkeypatch) -> None:
     _configure(monkeypatch)
     monkeypatch.setattr(email_delivery.settings, "brevo_api_key", SecretStr("replace-with-your-brevo-api-key"))
     assert not email_delivery.email_delivery_configured()
+
+
+def test_brevo_ip_rejection_logs_a_reason_without_exposing_response_body(monkeypatch, caplog) -> None:
+    _configure(monkeypatch)
+    monkeypatch.setattr(
+        email_delivery.httpx,
+        "post",
+        lambda *args, **kwargs: httpx.Response(403, json={
+            "code": "unauthorized",
+            "message": "We detected an unrecognised IP address 192.0.2.1.",
+        }),
+    )
+
+    with pytest.raises(email_delivery.EmailDeliveryError):
+        email_delivery.send_email("owner@example.com", "Verify", "Your code", idempotency_key="verify-abc")
+
+    assert "HTTP 403; reason=ip_not_authorized" in caplog.text
+    assert "192.0.2.1" not in caplog.text
+    assert "owner@example.com" not in caplog.text

@@ -5,7 +5,7 @@ from app.firebase.admin import FirebaseInitializationError
 from app.models.auth import AuthResponse, AuthenticatedUser, CurrentUserResponse, EmailAlertsRequest, EmailVerificationRequest, LoginRequest, PasswordChangeRequest, ProfileUpdateRequest, RegisterRequest
 from app.services.auth_service import UserProfileService, authenticate_with_password, create_access_token, get_current_user, get_session_user, register_with_password, sync_current_user_profile
 from app.services.email_account_service import EmailAccountService
-from app.services.email_delivery import EmailDeliveryError, email_delivery_configured
+from app.services.email_delivery import EmailDeliveryError
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -19,8 +19,6 @@ def _auth_response(user: AuthenticatedUser) -> AuthResponse:
 
 @router.post("/register", response_model=AuthResponse, status_code=201)
 def register(data: RegisterRequest) -> AuthResponse:
-    if not email_delivery_configured():
-        raise HTTPException(status_code=503, detail="New registration is temporarily unavailable because email verification is offline.")
     return _auth_response(register_with_password(data.name, str(data.email), data.password))
 
 

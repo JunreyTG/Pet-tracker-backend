@@ -3,10 +3,11 @@ from datetime import datetime
 from typing import Any, Generic, TypeVar
 
 from firebase_admin import firestore
+from google.api_core.retry import Retry
 from google.cloud.firestore import Client, DocumentSnapshot
 from pydantic import BaseModel
 
-from app.firebase.firestore import get_firestore_client
+from app.firebase.firestore import READ_TIMEOUT_SECONDS, get_firestore_client
 from app.models.entities import (
     Alert,
     AlertCreate,
@@ -33,6 +34,8 @@ from app.models.entities import (
 ModelT = TypeVar("ModelT", bound=BaseModel)
 CreateT = TypeVar("CreateT", bound=BaseModel)
 UpdateT = TypeVar("UpdateT", bound=BaseModel)
+# Firestore's streaming error handler expects a Retry object even to decline a retry.
+_NO_QUERY_RETRY = Retry(predicate=lambda _: False)
 
 
 class FirestoreRepository(Generic[ModelT, CreateT, UpdateT]):
@@ -56,7 +59,7 @@ class FirestoreRepository(Generic[ModelT, CreateT, UpdateT]):
         return self._from_snapshot(snapshot)
 
     def get(self, document_id: str) -> ModelT | None:
-        snapshot = self.collection.document(document_id).get()
+        snapshot = self.collection.document(document_id).get(retry=None, timeout=READ_TIMEOUT_SECONDS)
         if not snapshot.exists:
             return None
         return self._from_snapshot(snapshot)
@@ -103,13 +106,17 @@ class FirestoreRepository(Generic[ModelT, CreateT, UpdateT]):
         return self._where_equals("device_id", device_id)
 
     def _where_equals(self, field: str, value: str) -> list[ModelT]:
-        snapshots = self.collection.where(filter=firestore.FieldFilter(field, "==", value)).stream()
+        query = self.collection.where(filter=firestore.FieldFilter(field, "==", value))
+        snapshots = query.stream(retry=_NO_QUERY_RETRY, timeout=READ_TIMEOUT_SECONDS)
         return [self._from_snapshot(snapshot) for snapshot in snapshots]
 
     def _from_snapshot(self, snapshot: DocumentSnapshot) -> ModelT:
-        data = snapshot.to_dict() or {}
+        data = self._snapshot_data(snapshot)
         data["id"] = snapshot.id
         return self.model_class.model_validate(data)
+
+    def _snapshot_data(self, snapshot: DocumentSnapshot) -> dict[str, Any]:
+        return snapshot.to_dict() or {}
 
     @staticmethod
     def _dump(model: BaseModel, exclude_unset: bool = False) -> dict[str, Any]:
@@ -132,6 +139,17 @@ class PetRepository(FirestoreRepository[Pet, PetCreate, PetUpdate]):
 class DeviceRepository(FirestoreRepository[Device, DeviceCreate, DeviceUpdate]):
     collection_name = "devices"
     model_class = Device
+
+    def _snapshot_data(self, snapshot: DocumentSnapshot) -> dict[str, Any]:
+        data = super()._snapshot_data(snapshot)
+        position = data.get("current_location")
+        if isinstance(position, dict):
+            # Older firmware data stored telemetry metadata alongside coordinates.
+            data["current_location"] = {
+                key: value for key, value in position.items()
+                if key not in {"battery_level", "timestamp", "speed"}
+            }
+        return data
 
     def create(self, data: DeviceCreate) -> Device:  # type: ignore[override]
         return super().create(data, document_id=data.device_id)
@@ -159,7 +177,10 @@ class TrackingHistoryRepository(
         # indexes for owner_id/pet_id/recorded_at combinations. Ownership,
         # date range, ordering, and limit are applied below.
         query = self.collection.where(filter=firestore.FieldFilter("pet_id", "==", pet_id))
-        records = [self._from_snapshot(snapshot) for snapshot in query.stream()]
+        records = [
+            self._from_snapshot(snapshot)
+            for snapshot in query.stream(retry=_NO_QUERY_RETRY, timeout=READ_TIMEOUT_SECONDS)
+        ]
         filtered = [record for record in records if record.owner_id == owner_id]
         if start_time is not None:
             filtered = [record for record in filtered if record.recorded_at >= start_time]

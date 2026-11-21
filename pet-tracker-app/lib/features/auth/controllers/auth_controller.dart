@@ -53,9 +53,7 @@ class AuthController extends GetxController {
         try {
           final liveUser = await _backendAuth.me();
           backendUser.value = liveUser;
-          if (!liveUser.emailVerificationRequired) {
-            _notifications.registerCurrentDevice();
-          }
+          _notifications.registerCurrentDevice();
         } catch (e) {
           if (e is ApiException && e.statusCode == 401) {
             await logout();
@@ -76,12 +74,8 @@ class AuthController extends GetxController {
     }
     final user = await _backendAuth.login(trimmedEmail, password);
     backendUser.value = user;
-    if (user.emailVerificationRequired) {
-      Get.offAllNamed(Routes.emailSettings);
-    } else {
-      await _notifications.registerCurrentDevice();
-      Get.offAllNamed(Routes.home);
-    }
+    await _notifications.registerCurrentDevice();
+    Get.offAllNamed(Routes.home);
   });
 
   Future<void> register(String email, String password, String name) =>
@@ -97,12 +91,8 @@ class AuthController extends GetxController {
           trimmedName,
         );
         backendUser.value = user;
-        if (user.emailVerificationRequired) {
-          Get.offAllNamed(Routes.emailSettings, arguments: true);
-        } else {
-          await _notifications.registerCurrentDevice();
-          Get.offAllNamed(Routes.home);
-        }
+        await _notifications.registerCurrentDevice();
+        Get.offAllNamed(Routes.home);
       });
 
   Future<void> forgotPassword(String email) => _authAction(() async {
@@ -160,14 +150,12 @@ class AuthController extends GetxController {
 
   Future<void> verifyEmail(String code) async {
     final session = Get.find<ApiClient>().authToken;
-    final wasRequired = backendUser.value?.emailVerificationRequired == true;
     final user = await _backendAuth.verifyEmail(code);
     if (session != Get.find<ApiClient>().authToken ||
         backendUser.value?.uid != user.uid) {
       return;
     }
     backendUser.value = user;
-    if (wasRequired) await _notifications.registerCurrentDevice();
   }
 
   Future<void> setEmailAlerts(bool enabled) async {

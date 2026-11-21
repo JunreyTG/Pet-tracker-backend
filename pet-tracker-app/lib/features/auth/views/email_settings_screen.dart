@@ -2,13 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
-import '../../../app/routes/app_routes.dart';
 import '../../../core/api/api_exception.dart';
 import '../controllers/auth_controller.dart';
 
 class EmailSettingsScreen extends StatefulWidget {
-  const EmailSettingsScreen({super.key, this.sendOnOpen = false});
-  final bool sendOnOpen;
+  const EmailSettingsScreen({super.key});
 
   @override
   State<EmailSettingsScreen> createState() => _EmailSettingsScreenState();
@@ -21,16 +19,6 @@ class _EmailSettingsScreenState extends State<EmailSettingsScreen> {
   bool _sent = false;
   bool _failed = false;
   String? _message;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.sendOnOpen) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _send();
-      });
-    }
-  }
 
   @override
   void dispose() {
@@ -83,11 +71,8 @@ class _EmailSettingsScreenState extends State<EmailSettingsScreen> {
     if (!RegExp(r'^[0-9A-F]{16}$').hasMatch(code)) {
       throw ApiException('Enter the 16-character code from your email.');
     }
-    final required = _auth.backendUser.value?.emailVerificationRequired == true;
     await _auth.verifyEmail(code);
-    if (required && _auth.backendUser.value?.emailVerified == true) {
-      Get.offAllNamed(Routes.home);
-    } else if (mounted) {
+    if (mounted) {
       _code.clear();
       setState(
         () => _message = 'Email verified. You can now enable email alerts.',
@@ -98,13 +83,9 @@ class _EmailSettingsScreenState extends State<EmailSettingsScreen> {
   @override
   Widget build(BuildContext context) => Obx(() {
     final user = _auth.backendUser.value;
-    final required = user?.emailVerificationRequired == true;
     final verified = user?.emailVerified == true;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(required ? 'Verify your email' : 'Email notifications'),
-        automaticallyImplyLeading: !required,
-      ),
+      appBar: AppBar(title: const Text('Email notifications')),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -145,10 +126,8 @@ class _EmailSettingsScreenState extends State<EmailSettingsScreen> {
                           ),
                         )
                       else ...[
-                        Text(
-                          required
-                              ? 'Enter the code sent to your email to finish setting up your account.'
-                              : 'Verify this address before enabling email alerts.',
+                        const Text(
+                          'Verify this address before enabling email alerts.',
                         ),
                         const SizedBox(height: 16),
                         TextField(
@@ -194,11 +173,6 @@ class _EmailSettingsScreenState extends State<EmailSettingsScreen> {
                               ),
                             ),
                           ),
-                        ),
-                      if (required)
-                        TextButton(
-                          onPressed: _busy ? null : _auth.logout,
-                          child: const Text('Sign out'),
                         ),
                     ],
                   ),

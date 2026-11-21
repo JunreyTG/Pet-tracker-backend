@@ -7,7 +7,6 @@ class UserModel {
     this.location,
     this.bio,
     this.emailVerified = false,
-    this.emailVerificationRequired = false,
     this.emailAlertsEnabled = false,
   });
   final String uid;
@@ -17,7 +16,6 @@ class UserModel {
   final String? location;
   final String? bio;
   final bool emailVerified;
-  final bool emailVerificationRequired;
   final bool emailAlertsEnabled;
   factory UserModel.fromJson(Map<String, dynamic> json) => UserModel(
     uid: json['uid'] ?? '',
@@ -27,7 +25,6 @@ class UserModel {
     location: parseTextOrNull(json['location']),
     bio: parseTextOrNull(json['bio']),
     emailVerified: json['email_verified'] == true,
-    emailVerificationRequired: json['email_verification_required'] == true,
     emailAlertsEnabled: json['email_alerts_enabled'] == true,
   );
   Map<String, dynamic> toJson() => {
@@ -38,7 +35,6 @@ class UserModel {
     'location': location,
     'bio': bio,
     'email_verified': emailVerified,
-    'email_verification_required': emailVerificationRequired,
     'email_alerts_enabled': emailAlertsEnabled,
   };
 }

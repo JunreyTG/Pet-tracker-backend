@@ -10,7 +10,6 @@ import 'app/theme/app_preferences.dart';
 import 'app/theme/app_theme.dart';
 import 'core/services/notification_service.dart';
 import 'features/auth/controllers/auth_controller.dart';
-import 'features/auth/views/email_settings_screen.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
@@ -60,9 +59,6 @@ class AuthGate extends StatelessWidget {
     return Obx(() {
       if (auth.initializing.value) {
         return const Scaffold(body: Center(child: CircularProgressIndicator()));
-      }
-      if (auth.backendUser.value?.emailVerificationRequired == true) {
-        return const EmailSettingsScreen();
       }
       return auth.isAuthenticated ? AppPages.homeScreen : AppPages.loginScreen;
     });

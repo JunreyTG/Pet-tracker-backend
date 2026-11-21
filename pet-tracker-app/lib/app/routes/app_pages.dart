@@ -48,7 +48,7 @@ class AppPages {
     GetPage(name: Routes.settings, page: () => const SettingsScreen()),
     GetPage(
       name: Routes.emailSettings,
-      page: () => EmailSettingsScreen(sendOnOpen: Get.arguments == true),
+      page: () => const EmailSettingsScreen(),
     ),
     GetPage(
       name: Routes.accountProfile,

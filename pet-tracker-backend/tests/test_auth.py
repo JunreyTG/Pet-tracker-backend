@@ -1,5 +1,6 @@
 import re
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -8,6 +9,7 @@ from firebase_admin import firestore
 from app.main import app
 from app.models.auth import AuthenticatedUser
 from app.services import auth_service, email_account_service
+from app.services.pet_service import get_pet_service
 
 
 client = TestClient(app)
@@ -139,10 +141,9 @@ def test_auth_me_returns_authenticated_user_information(monkeypatch) -> None:
 def test_register_returns_token_and_user(monkeypatch) -> None:
     def fake_register(name: str, email: str, password: str) -> AuthenticatedUser:
         assert (name, email, password) == ("Owner", "owner@example.com", "secret123")
-        return AuthenticatedUser(uid="user-1", email=email, display_name=name, email_verification_required=True)
+        return AuthenticatedUser(uid="user-1", email=email, display_name=name)
 
     monkeypatch.setattr("app.api.auth.register_with_password", fake_register)
-    monkeypatch.setattr("app.api.auth.email_delivery_configured", lambda: True)
     monkeypatch.setattr("app.api.auth.create_access_token", lambda user: f"token-for-{user.uid}")
 
     response = client.post(
@@ -154,7 +155,7 @@ def test_register_returns_token_and_user(monkeypatch) -> None:
     assert response.json() == {
         "access_token": "token-for-user-1",
         "token_type": "bearer",
-        "user": {"uid": "user-1", "email": "owner@example.com", "display_name": "Owner", **UNVERIFIED, "email_verification_required": True},
+        "user": {"uid": "user-1", "email": "owner@example.com", "display_name": "Owner", **UNVERIFIED},
     }
 
 
@@ -298,14 +299,14 @@ def test_password_change_validates_current_password_and_revokes_previous_session
     assert client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {fresh}"}).status_code == 200
 
 
-def test_new_registration_requires_control_of_the_email_address(monkeypatch) -> None:
+def test_registration_does_not_require_email_and_verification_enables_optional_alerts(monkeypatch) -> None:
     document = FakeDocument(False)
     store = FakeClient(document)
     monkeypatch.setattr(auth_service, "get_firestore_client", lambda: store)
     monkeypatch.setattr(email_account_service, "get_firestore_client", lambda: store)
     monkeypatch.setattr(firestore, "transactional", lambda fn: fn)
-    monkeypatch.setattr(email_account_service, "email_delivery_configured", lambda: True)
-    monkeypatch.setattr("app.api.auth.email_delivery_configured", lambda: True)
+    monkeypatch.setattr(email_account_service, "email_delivery_configured", lambda: False)
+    monkeypatch.setitem(app.dependency_overrides, get_pet_service, lambda: SimpleNamespace(list_pets=lambda owner: []))
     delivered = []
 
     def capture(recipient, subject, text, *, idempotency_key):
@@ -317,13 +318,17 @@ def test_new_registration_requires_control_of_the_email_address(monkeypatch) -> 
     signup = client.post("/api/v1/auth/register", json=payload)
     assert signup.status_code == 201
     headers = {"Authorization": f"Bearer {signup.json()['access_token']}"}
-    assert signup.json()["user"]["email_verification_required"] is True
-    assert client.get("/api/v1/auth/me", headers=headers).status_code == 200
-    assert client.get("/api/v1/pets", headers=headers).status_code == 403
+    assert signup.json()["user"]["email_verification_required"] is False
+    # Accounts registered before this change must also get access immediately.
+    document.data["requires_email_verification"] = True
+    assert client.get("/api/v1/auth/me", headers=headers).json()["email_verification_required"] is False
+    assert client.get("/api/v1/pets", headers=headers).status_code == 200
     pref = "/api/v1/auth/email/alerts"
     assert client.patch(pref, json={"enabled": True}, headers=headers).status_code == 409
     send = "/api/v1/auth/email/send"
     assert client.post(send).status_code == 401
+    assert client.post(send, headers=headers).status_code == 503
+    monkeypatch.setattr(email_account_service, "email_delivery_configured", lambda: True)
     assert client.post(send, headers=headers).status_code == 204
     assert client.post(send, headers=headers).status_code == 429
     assert len(delivered) == 1 and delivered[0][0] == payload["email"]

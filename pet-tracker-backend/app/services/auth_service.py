@@ -13,7 +13,7 @@ from google.api_core.exceptions import AlreadyExists, GoogleAPIError
 from google.cloud.firestore import Client
 
 from app.core.config import settings
-from app.firebase.firestore import get_firestore_client
+from app.firebase.firestore import READ_TIMEOUT_SECONDS, get_firestore_client
 from app.models.auth import AuthenticatedUser
 
 logger = logging.getLogger(__name__)
@@ -137,8 +137,6 @@ def get_session_user(authorization: str | None = Header(default=None)) -> Authen
 
 
 def get_current_user(user: AuthenticatedUser = Depends(get_session_user)) -> AuthenticatedUser:
-    if user.email_verification_required:
-        raise HTTPException(status_code=403, detail="Verify your email to finish setting up your account.")
     return user
 
 
@@ -153,7 +151,7 @@ class UserProfileService:
 
     def sync_user_profile(self, user: AuthenticatedUser) -> dict[str, Any]:
         document = self.collection.document(user.uid)
-        snapshot = document.get()
+        snapshot = document.get(retry=None, timeout=READ_TIMEOUT_SECONDS)
         if snapshot.exists:
             return self._profile(user, snapshot.to_dict() or {})
 
@@ -194,7 +192,8 @@ class UserProfileService:
         return data
 
     def check_session(self, user: AuthenticatedUser) -> AuthenticatedUser:
-        profile = self._validate_session(self.collection.document(user.uid).get(), user)
+        snapshot = self.collection.document(user.uid).get(retry=None, timeout=READ_TIMEOUT_SECONDS)
+        profile = self._validate_session(snapshot, user)
         return user.model_copy(update=email_account_state(profile))
 
     def update_profile(self, user: AuthenticatedUser, changes: dict[str, str | None]) -> dict[str, Any]:
@@ -253,7 +252,6 @@ class UserProfileService:
                 "password_salt": password_salt,
                 "password_hash": password_hash,
                 "credential_version": credential_version,
-                "requires_email_verification": True,
                 "created_at": firestore.SERVER_TIMESTAMP,
                 "updated_at": firestore.SERVER_TIMESTAMP,
             })
@@ -261,7 +259,7 @@ class UserProfileService:
             raise HTTPException(status_code=409, detail="An account already exists for this email.") from exc
         return AuthenticatedUser(
             uid=uid, email=normalized_email, display_name=name.strip(),
-            credential_version=credential_version, email_verification_required=True,
+            credential_version=credential_version,
         )
 
     def authenticate_user(self, email: str, password: str) -> AuthenticatedUser:
@@ -294,7 +292,7 @@ def email_account_state(profile: dict[str, Any]) -> dict[str, bool]:
     verified = bool(address and profile.get("verified_email") == address)
     return {
         "email_verified": verified,
-        "email_verification_required": profile.get("requires_email_verification") is True and not verified,
+        "email_verification_required": False,  # Retained for older app builds.
         "email_alerts_enabled": verified and profile.get("email_alerts_enabled") is True,
     }
 
