@@ -173,6 +173,7 @@ class PetModel {
     this.age,
     this.photoUrl,
     this.deviceId,
+    this.ownerId,
     this.createdAt,
     this.updatedAt,
   });
@@ -183,6 +184,7 @@ class PetModel {
   final int? age;
   final String? photoUrl;
   final String? deviceId;
+  final String? ownerId;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   factory PetModel.fromJson(Map<String, dynamic> json) => PetModel(
@@ -193,6 +195,7 @@ class PetModel {
     age: parseIntOrNull(json['age']),
     photoUrl: json['photo_url']?.toString(),
     deviceId: json['device_id']?.toString(),
+    ownerId: json['owner_id']?.toString(),
     createdAt: parseDate(json['created_at']),
     updatedAt: parseDate(json['updated_at']),
   );
@@ -204,6 +207,8 @@ class DeviceModel {
     required this.deviceId,
     this.name,
     this.petId,
+    this.ownerId,
+    this.viewerIds = const [],
     required this.status,
     this.batteryLevel,
     this.currentLocation,
@@ -216,6 +221,8 @@ class DeviceModel {
   final String deviceId;
   final String? name;
   final String? petId;
+  final String? ownerId;
+  final List<String> viewerIds;
   final String status;
   final int? batteryLevel;
   final LocationModel? currentLocation;
@@ -229,6 +236,8 @@ class DeviceModel {
     deviceId: json['device_id']?.toString() ?? '',
     name: json['name'] as String?,
     petId: json['pet_id']?.toString(),
+    ownerId: json['owner_id']?.toString(),
+    viewerIds: (json['viewer_ids'] as List?)?.map((e) => e.toString()).toList() ?? const [],
     status: json['status']?.toString() ?? 'unregistered',
     batteryLevel: parseIntOrNull(json['battery_level']),
     currentLocation: parseLocationOrNull(json['current_location']),

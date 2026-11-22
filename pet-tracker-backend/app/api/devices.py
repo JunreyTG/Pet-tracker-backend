@@ -7,6 +7,7 @@ from app.models.entities import Device
 from app.schemas.devices import (
     DeviceAssignRequest,
     DeviceClaimRequest,
+    DeviceJoinRequest,
     DeviceRegisterRequest,
     DeviceRegistrationResponse,
     DeviceResponse,
@@ -75,6 +76,38 @@ def claim_device(
         raise HTTPException(status_code=404, detail="Tracker or pet not available for this account.") from exc
     except DeviceConflictError as exc:
         raise _conflict(str(exc)) from exc
+    except DeviceServiceError as exc:
+        raise _unavailable() from exc
+
+
+@router.post("/join", response_model=DeviceResponse)
+def join_device(
+    data: DeviceJoinRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    device_service: DeviceService = Depends(get_device_service),
+) -> dict[str, Any]:
+    try:
+        return _device_payload(device_service.join_device(current_user.uid, data.device_id))
+    except DeviceNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="No tracker with that ID was found. Ask the owner to link it first.",
+        ) from exc
+    except DeviceServiceError as exc:
+        raise _unavailable() from exc
+
+
+@router.delete("/{device_id}/viewers/{viewer_uid}", response_model=DeviceResponse)
+def remove_viewer(
+    device_id: str,
+    viewer_uid: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    device_service: DeviceService = Depends(get_device_service),
+) -> dict[str, Any]:
+    try:
+        return _device_payload(device_service.remove_viewer(current_user.uid, device_id, viewer_uid))
+    except DeviceNotFoundError as exc:
+        raise _not_found() from exc
     except DeviceServiceError as exc:
         raise _unavailable() from exc
 

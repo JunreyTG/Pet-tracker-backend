@@ -7,6 +7,7 @@ import '../../../core/utils/navigation_args.dart';
 import '../../../core/widgets/app_scaffold.dart';
 import '../../../core/widgets/pet_avatar.dart';
 import '../../../data/models/models.dart';
+import '../../auth/controllers/auth_controller.dart';
 import '../../home/controllers/app_data_controller.dart';
 
 class PetDetailsScreen extends StatelessWidget {
@@ -16,12 +17,14 @@ class PetDetailsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = Get.find<AppDataController>();
     final id = asIdString(Get.arguments);
+    final myUid = Get.find<AuthController>().backendUser.value?.uid;
     return Scaffold(
       appBar: AppBar(title: const Text('Pet Details')),
       body: Obx(() {
         final pet = data.pets.firstWhereOrNull((p) => p.id == id);
         if (pet == null) return const Center(child: Text('Pet not found.'));
         final device = data.deviceForPet(pet);
+        final isOwner = myUid != null && pet.ownerId == myUid;
         return ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           children: [
@@ -72,17 +75,25 @@ class PetDetailsScreen extends StatelessWidget {
               icon: const Icon(Icons.map),
               label: const Text('Open Map'),
             ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: () => Get.toNamed(Routes.addPet, arguments: pet),
-              icon: const Icon(Icons.edit),
-              label: const Text('Edit Pet'),
-            ),
-            TextButton.icon(
-              onPressed: () => _deletePet(data, pet),
-              icon: const Icon(Icons.delete),
-              label: const Text('Delete Pet'),
-            ),
+            if (isOwner) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () => Get.toNamed(Routes.addPet, arguments: pet),
+                icon: const Icon(Icons.edit),
+                label: const Text('Edit Pet'),
+              ),
+              TextButton.icon(
+                onPressed: () => _deletePet(data, pet),
+                icon: const Icon(Icons.delete),
+                label: const Text('Delete Pet'),
+              ),
+            ] else
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: Text(
+                  'Shared with you (view only). Only the owner can edit or delete this pet.',
+                ),
+              ),
           ],
         );
       }),

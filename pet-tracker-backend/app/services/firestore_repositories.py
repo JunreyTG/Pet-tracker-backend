@@ -161,6 +161,11 @@ class DeviceRepository(FirestoreRepository[Device, DeviceCreate, DeviceUpdate]):
     def query_by_status(self, status: str) -> list[Device]:
         return self._where_equals("status", status)
 
+    def query_by_viewer(self, uid: str) -> list[Device]:
+        query = self.collection.where(filter=firestore.FieldFilter("viewer_ids", "array_contains", uid))
+        snapshots = query.stream(retry=_NO_QUERY_RETRY, timeout=READ_TIMEOUT_SECONDS)
+        return [self._from_snapshot(snapshot) for snapshot in snapshots]
+
 
 class TrackingHistoryRepository(
     FirestoreRepository[TrackingHistory, TrackingHistoryCreate, TrackingHistoryCreate]

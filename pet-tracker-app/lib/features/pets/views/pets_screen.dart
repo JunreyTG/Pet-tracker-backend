@@ -5,6 +5,7 @@ import '../../../app/routes/app_routes.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../core/widgets/app_scaffold.dart';
 import '../../../core/widgets/pet_avatar.dart';
+import '../../auth/controllers/auth_controller.dart';
 import '../../home/controllers/app_data_controller.dart';
 
 class PetsScreen extends StatelessWidget {
@@ -13,6 +14,7 @@ class PetsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = Get.find<AppDataController>();
+    final myUid = Get.find<AuthController>().backendUser.value?.uid;
     return AppScaffold(
       title: 'My Pet',
       currentIndex: 2,
@@ -46,6 +48,7 @@ class PetsScreen extends StatelessWidget {
             itemBuilder: (_, i) {
               final pet = data.pets[i];
               final device = data.deviceForPet(pet);
+              final isShared = myUid != null && pet.ownerId != myUid;
               return SectionCard(
                 margin: const EdgeInsets.only(bottom: 12),
                 onTap: () => Get.toNamed(Routes.petDetails, arguments: pet.id),
@@ -71,11 +74,22 @@ class PetsScreen extends StatelessWidget {
                             '${pet.species}${pet.breed == null ? '' : ' • ${pet.breed}'}',
                           ),
                           const SizedBox(height: 8),
-                          _StatusPill(
-                            text: device == null
-                                ? 'No collar'
-                                : '${device.status} • ${device.batteryLevel?.toString() ?? '--'}%',
-                            active: device?.status == 'online',
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: [
+                              _StatusPill(
+                                text: device == null
+                                    ? 'No collar'
+                                    : '${device.status} • ${device.batteryLevel?.toString() ?? '--'}%',
+                                active: device?.status == 'online',
+                              ),
+                              if (isShared)
+                                const _StatusPill(
+                                  text: 'Shared (view only)',
+                                  active: null,
+                                ),
+                            ],
                           ),
                         ],
                       ),
@@ -95,22 +109,27 @@ class PetsScreen extends StatelessWidget {
 class _StatusPill extends StatelessWidget {
   const _StatusPill({required this.text, required this.active});
   final String text;
-  final bool active;
+  final bool? active;
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-    decoration: BoxDecoration(
-      color: (active ? AppTheme.green : AppTheme.orange).withValues(alpha: .12),
-      borderRadius: BorderRadius.circular(999),
-    ),
-    child: Text(
-      text,
-      style: TextStyle(
-        color: active ? AppTheme.green : AppTheme.orange,
-        fontWeight: FontWeight.w800,
-        fontSize: 12,
+  Widget build(BuildContext context) {
+    final color = active == null
+        ? const Color(0xFF168CFF)
+        : (active! ? AppTheme.green : AppTheme.orange);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .12),
+        borderRadius: BorderRadius.circular(999),
       ),
-    ),
-  );
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w800,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
 }

@@ -99,6 +99,7 @@ class DeviceBase(FirestoreModel):
     name: str | None = Field(default=None, min_length=1, max_length=40)
     preconfigured: bool = False
     owner_id: str = Field(min_length=1)
+    viewer_ids: list[str] = Field(default_factory=list)
     pet_id: str | None = None
     status: DeviceStatus = DeviceStatus.UNREGISTERED
     device_secret_hash: str | None = None

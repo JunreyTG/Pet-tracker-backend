@@ -31,10 +31,20 @@ class DeviceClaimRequest(FirestoreModel):
         return value.strip().upper() if isinstance(value, str) else value
 
 
+class DeviceJoinRequest(FirestoreModel):
+    device_id: str = Field(pattern=PT_DEVICE_ID_PATTERN)
+
+    @field_validator("device_id", mode="before")
+    @classmethod
+    def normalize_id(cls, value: str) -> str:
+        return value.strip().upper() if isinstance(value, str) else value
+
+
 class DeviceResponse(FirestoreModel):
     id: str
     device_id: str
     owner_id: str
+    viewer_ids: list[str] = Field(default_factory=list)
     name: str | None = None
     preconfigured: bool = False
     pet_id: str | None = None

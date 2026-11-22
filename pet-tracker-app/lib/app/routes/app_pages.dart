@@ -5,6 +5,7 @@ import '../../features/auth/views/login_screen.dart';
 import '../../features/auth/views/email_settings_screen.dart';
 import '../../features/auth/views/register_screen.dart';
 import '../../features/devices/views/device_details_screen.dart';
+import '../../features/devices/views/device_join_screen.dart';
 import '../../features/devices/views/device_link_screen.dart';
 import '../../features/devices/views/device_wifi_screen.dart';
 import '../../features/devices/views/devices_screen.dart';
@@ -33,6 +34,7 @@ class AppPages {
     GetPage(name: Routes.addPet, page: () => const PetFormScreen()),
     GetPage(name: Routes.devices, page: () => const DevicesScreen()),
     GetPage(name: Routes.deviceLink, page: () => const DeviceLinkScreen()),
+    GetPage(name: Routes.deviceJoin, page: () => const DeviceJoinScreen()),
     GetPage(name: Routes.deviceWifi, page: () => const DeviceWifiScreen()),
     GetPage(
       name: Routes.deviceDetails,

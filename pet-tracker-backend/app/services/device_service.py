@@ -78,24 +78,68 @@ class DeviceService:
 
         return DeviceRegistration(device=device, device_secret=device_secret)
 
-    def list_devices(self, owner_id: str) -> list[Device]:
+    def list_devices(self, uid: str) -> list[Device]:
         try:
-            return self.device_repository.query_by_owner(owner_id)
+            owned = self.device_repository.query_by_owner(uid)
+            shared = self.device_repository.query_by_viewer(uid)
         except GoogleAPIError as exc:
             logger.info("Firestore device list failed: %s", exc.__class__.__name__)
             raise DeviceServiceError("Devices could not be listed.") from exc
 
-    def get_device(self, owner_id: str, device_id: str) -> Device:
+        seen = {device.id for device in owned}
+        return owned + [device for device in shared if device.id not in seen]
+
+    def get_device(self, uid: str, device_id: str) -> Device:
         try:
             device = self.device_repository.get(device_id)
         except GoogleAPIError as exc:
             logger.info("Firestore device lookup failed: %s", exc.__class__.__name__)
             raise DeviceServiceError("Device could not be loaded.") from exc
 
-        if device is None or device.owner_id != owner_id:
+        if device is None or (device.owner_id != uid and uid not in device.viewer_ids):
             raise DeviceNotFoundError("Device was not found.")
 
         return device
+
+    def join_device(self, viewer_id: str, device_id: str) -> Device:
+        @firestore.transactional
+        def join(transaction):
+            device = self.device_repository.get(device_id, transaction=transaction)
+            if device is None:
+                raise DeviceNotFoundError("Device was not found.")
+            if device.owner_id == viewer_id or viewer_id in device.viewer_ids:
+                return
+            transaction.update(self.device_repository.collection.document(device_id), {
+                "viewer_ids": firestore.ArrayUnion([viewer_id]),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            })
+
+        try:
+            join(self.device_repository.client.transaction())
+        except DeviceNotFoundError:
+            raise
+        except GoogleAPIError as exc:
+            logger.info("Firestore device join failed: %s", exc.__class__.__name__)
+            raise DeviceServiceError("Could not join this tracker.") from exc
+
+        return self.get_device(viewer_id, device_id)
+
+    def remove_viewer(self, owner_id: str, device_id: str, viewer_id: str) -> Device:
+        try:
+            device = self.device_repository.get(device_id)
+            if device is None or device.owner_id != owner_id:
+                raise DeviceNotFoundError("Device was not found.")
+            self.device_repository.collection.document(device_id).update({
+                "viewer_ids": firestore.ArrayRemove([viewer_id]),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            })
+        except DeviceNotFoundError:
+            raise
+        except GoogleAPIError as exc:
+            logger.info("Firestore viewer removal failed: %s", exc.__class__.__name__)
+            raise DeviceServiceError("Could not remove this viewer.") from exc
+
+        return self.get_device(owner_id, device_id)
 
     def assign_device_to_pet(self, owner_id: str, device_id: str, pet_id: str) -> Device:
         return self._assign(owner_id, device_id, pet_id, claim=False)

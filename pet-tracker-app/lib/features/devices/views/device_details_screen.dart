@@ -8,6 +8,7 @@ import '../../../core/utils/navigation_args.dart';
 import '../../../core/widgets/app_scaffold.dart';
 import '../../../core/widgets/pet_avatar.dart';
 import '../../../data/models/models.dart';
+import '../../auth/controllers/auth_controller.dart';
 import '../../home/controllers/app_data_controller.dart';
 
 class DeviceDetailsScreen extends StatelessWidget {
@@ -17,6 +18,7 @@ class DeviceDetailsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = Get.find<AppDataController>();
     final id = asIdString(Get.arguments);
+    final myUid = Get.find<AuthController>().backendUser.value?.uid;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Tracker Details')),
@@ -28,6 +30,7 @@ class DeviceDetailsScreen extends StatelessWidget {
             : data.pets.firstWhereOrNull((p) => p.id == d.petId);
         final online = d.status == 'online';
         final isDark = Theme.of(context).brightness == Brightness.dark;
+        final isOwner = myUid != null && d.ownerId == myUid;
 
         return ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -81,6 +84,12 @@ class DeviceDetailsScreen extends StatelessWidget {
                               : Icons.gps_not_fixed,
                           text: d.gpsFix! ? 'GPS reporting' : 'Waiting for GPS',
                           color: d.gpsFix! ? AppTheme.green : AppTheme.orange,
+                        ),
+                      if (!isOwner)
+                        const _DetailChip(
+                          icon: Icons.visibility_outlined,
+                          text: 'Shared (view only)',
+                          color: Color(0xFF168CFF),
                         ),
                     ],
                   ),
@@ -184,33 +193,35 @@ class DeviceDetailsScreen extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () => _assign(
-                              context,
-                              data,
-                              d.deviceId,
-                              currentPetId: pet.id,
+                    if (isOwner) ...[
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _assign(
+                                context,
+                                data,
+                                d.deviceId,
+                                currentPetId: pet.id,
+                              ),
+                              icon: const Icon(Icons.sync_alt, size: 18),
+                              label: const Text('Change Pet'),
                             ),
-                            icon: const Icon(Icons.sync_alt, size: 18),
-                            label: const Text('Change Pet'),
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        OutlinedButton.icon(
-                          onPressed: () => _unassign(data, d.deviceId),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.redAccent,
-                            side: const BorderSide(color: Colors.redAccent),
+                          const SizedBox(width: 10),
+                          OutlinedButton.icon(
+                            onPressed: () => _unassign(data, d.deviceId),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.redAccent,
+                              side: const BorderSide(color: Colors.redAccent),
+                            ),
+                            icon: const Icon(Icons.link_off, size: 18),
+                            label: const Text('Unassign'),
                           ),
-                          icon: const Icon(Icons.link_off, size: 18),
-                          label: const Text('Unassign'),
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               )
@@ -271,28 +282,36 @@ class DeviceDetailsScreen extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: () => _assign(context, data, d.deviceId),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.green,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
+                    if (isOwner) ...[
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: () => _assign(context, data, d.deviceId),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.green,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
                           ),
-                        ),
-                        icon: const Icon(Icons.add_link),
-                        label: const Text(
-                          'Assign Tracker to Pet',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
+                          icon: const Icon(Icons.add_link),
+                          label: const Text(
+                            'Assign Tracker to Pet',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ] else
+                      const Padding(
+                        padding: EdgeInsets.only(top: 16),
+                        child: Text(
+                          'Only the owner can assign a pet to this tracker.',
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -312,12 +331,14 @@ class DeviceDetailsScreen extends StatelessWidget {
               icon: const Icon(Icons.map),
               label: const Text('Track Location'),
             ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: () => Get.toNamed(Routes.deviceWifi),
-              icon: const Icon(Icons.wifi),
-              label: const Text('Change Collar Wi-Fi'),
-            ),
+            if (isOwner) ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: () => Get.toNamed(Routes.deviceWifi),
+                icon: const Icon(Icons.wifi),
+                label: const Text('Change Collar Wi-Fi'),
+              ),
+            ],
           ],
         );
       }),

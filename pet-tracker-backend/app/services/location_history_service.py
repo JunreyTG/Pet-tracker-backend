@@ -4,7 +4,7 @@ from datetime import datetime
 from google.api_core.exceptions import GoogleAPIError
 
 from app.models.entities import TrackingHistory
-from app.services.firestore_repositories import PetRepository, TrackingHistoryRepository
+from app.services.firestore_repositories import DeviceRepository, PetRepository, TrackingHistoryRepository
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +25,23 @@ class LocationHistoryService:
         self,
         pet_repository: PetRepository | None = None,
         history_repository: TrackingHistoryRepository | None = None,
+        device_repository: DeviceRepository | None = None,
     ) -> None:
         self.pet_repository = pet_repository or PetRepository()
         self.history_repository = history_repository or TrackingHistoryRepository()
+        self.device_repository = device_repository or DeviceRepository()
+
+    def _can_view(self, uid: str, pet) -> bool:
+        if pet.owner_id == uid:
+            return True
+        if pet.device_id is None:
+            return False
+        device = self.device_repository.get(pet.device_id)
+        return device is not None and uid in device.viewer_ids
 
     def list_pet_history(
         self,
-        owner_id: str,
+        uid: str,
         pet_id: str,
         limit: int = DEFAULT_LOCATION_HISTORY_LIMIT,
         start_time: datetime | None = None,
@@ -39,12 +49,12 @@ class LocationHistoryService:
     ) -> list[TrackingHistory]:
         try:
             pet = self.pet_repository.get(pet_id)
-            if pet is None or pet.owner_id != owner_id:
+            if pet is None or not self._can_view(uid, pet):
                 raise LocationHistoryNotFoundError("Pet was not found.")
 
             safe_limit = min(limit, MAX_LOCATION_HISTORY_LIMIT)
             records = self.history_repository.query_history_for_pet(
-                owner_id=owner_id,
+                owner_id=pet.owner_id,
                 pet_id=pet_id,
                 limit=safe_limit,
                 start_time=start_time,

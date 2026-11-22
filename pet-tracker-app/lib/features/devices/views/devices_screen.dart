@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../../../app/routes/app_routes.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../core/widgets/app_scaffold.dart';
+import '../../auth/controllers/auth_controller.dart';
 import '../../home/controllers/app_data_controller.dart';
 
 class DevicesScreen extends StatelessWidget {
@@ -12,10 +13,16 @@ class DevicesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = Get.find<AppDataController>();
+    final myUid = Get.find<AuthController>().backendUser.value?.uid;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Collar Management'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.group_add_outlined),
+            tooltip: 'Join a Shared Tracker',
+            onPressed: () => Get.toNamed(Routes.deviceJoin),
+          ),
           IconButton.filled(
             icon: const Icon(Icons.add),
             tooltip: 'Add Device',
@@ -44,6 +51,7 @@ class DevicesScreen extends StatelessWidget {
             itemBuilder: (_, i) {
               final d = data.devices[i];
               final online = d.status == 'online';
+              final isShared = myUid != null && d.ownerId != myUid;
               return SectionCard(
                 margin: const EdgeInsets.only(bottom: 12),
                 onTap: () =>
@@ -91,6 +99,14 @@ class DevicesScreen extends StatelessWidget {
                           text: '${d.batteryLevel?.toString() ?? '--'}%',
                           color: const Color(0xFFE5B64A),
                         ),
+                        if (isShared) ...[
+                          const SizedBox(width: 8),
+                          const _Chip(
+                            icon: Icons.visibility_outlined,
+                            text: 'Shared (view only)',
+                            color: Color(0xFF168CFF),
+                          ),
+                        ],
                       ],
                     ),
                   ],

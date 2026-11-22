@@ -201,6 +201,17 @@ class DeviceRepository {
       await _api.delete('/devices/$deviceId/assignment'),
     ),
   );
+  Future<DeviceModel> join(String deviceId) async => DeviceModel.fromJson(
+    Map<String, dynamic>.from(
+      await _api.post('/devices/join', body: {'device_id': deviceId}),
+    ),
+  );
+  Future<DeviceModel> removeViewer(String deviceId, String viewerUid) async =>
+      DeviceModel.fromJson(
+        Map<String, dynamic>.from(
+          await _api.delete('/devices/$deviceId/viewers/$viewerUid'),
+        ),
+      );
 }
 
 class GeofenceRepository {
