@@ -373,7 +373,11 @@ void setup() {
     deviceId = FactoryDeviceId;
     deviceSecret = FactoryDeviceSecret;
   }
-  if (ConfiguredWifiSsid[0]) {
+  // Only seed from the compiled-in config on a never-configured board.
+  // Once Wi-Fi is saved via the portal or /api/wifi, that value must win on
+  // every later boot — otherwise this would keep reverting to the original
+  // (likely failing) credentials baked in at flash time.
+  if (ssid.isEmpty() && ConfiguredWifiSsid[0]) {
     ssid = ConfiguredWifiSsid;
     wifiPassword = ConfiguredWifiPassword;
   }

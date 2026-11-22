@@ -92,9 +92,12 @@ class TrackingScreen extends StatelessWidget {
                           point: LatLng(g.center.latitude, g.center.longitude),
                           radius: g.radiusMeters,
                           useRadiusInMeter: true,
-                          color: Colors.green.withValues(alpha: .12),
-                          borderColor: g.enabled ? Colors.green : Colors.grey,
-                          borderStrokeWidth: 2,
+                          color: (g.enabled ? Colors.amber : Colors.grey)
+                              .withValues(alpha: .18),
+                          borderColor: g.enabled
+                              ? Colors.amber.shade700
+                              : Colors.grey,
+                          borderStrokeWidth: 2.5,
                         ),
                       )
                       .toList(),
