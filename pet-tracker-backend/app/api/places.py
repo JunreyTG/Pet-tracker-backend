@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.models.auth import AuthenticatedUser
-from app.schemas.places import PlaceOptionResponse, PlaceSearchResponse
+from app.schemas.places import PlaceOptionResponse, PlaceReverseResponse, PlaceSearchResponse
 from app.services.auth_service import get_current_user
 from app.services.place_service import PlaceService, PlaceServiceError, get_place_service
 
@@ -45,6 +45,20 @@ def search_places(
         raise _not_found()
 
     return places
+
+
+@router.get("/reverse", response_model=PlaceReverseResponse)
+def reverse_place(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    place_service: PlaceService = Depends(get_place_service),
+) -> PlaceReverseResponse:
+    _ = current_user
+    try:
+        return place_service.reverse_geocode(latitude=lat, longitude=lon)
+    except PlaceServiceError as exc:
+        raise _unavailable() from exc
 
 
 @router.get("/countries", response_model=list[PlaceOptionResponse])

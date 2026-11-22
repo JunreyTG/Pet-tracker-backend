@@ -40,6 +40,10 @@ class HomeScreen extends StatelessWidget {
                 photoUrl: pet?.photoUrl,
                 deviceStatus: device?.status,
                 battery: device?.batteryLevel,
+                onAvatarTap: pet?.id == null
+                    ? null
+                    : () =>
+                        Get.toNamed(Routes.petDetails, arguments: pet?.id),
                 onTrack: pet?.deviceId == null
                     ? null
                     : () => Get.toNamed(
@@ -128,12 +132,14 @@ class _PetHeroCard extends StatelessWidget {
     this.photoUrl,
     required this.deviceStatus,
     required this.battery,
+    this.onAvatarTap,
     required this.onTrack,
   });
   final String? petName;
   final String? photoUrl;
   final String? deviceStatus;
   final int? battery;
+  final VoidCallback? onAvatarTap;
   final VoidCallback? onTrack;
 
   @override
@@ -162,10 +168,16 @@ class _PetHeroCard extends StatelessWidget {
                     width: 2,
                   ),
                 ),
-                child: PetAvatar(
-                  photoUrl: photoUrl,
-                  size: 58,
+                child: ClipRRect(
                   borderRadius: BorderRadius.circular(22),
+                  child: InkWell(
+                    onTap: onAvatarTap,
+                    child: PetAvatar(
+                      photoUrl: photoUrl,
+                      size: 58,
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(width: 16),

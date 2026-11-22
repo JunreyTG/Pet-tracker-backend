@@ -8,6 +8,7 @@ class Routes {
   static const devices = '/devices';
   static const deviceDetails = '/device-details';
   static const deviceLink = '/device-link';
+  static const deviceWifi = '/device-wifi';
   static const tracking = '/tracking';
   static const mapFocus = '/map-focus';
   static const geofences = '/geofences';

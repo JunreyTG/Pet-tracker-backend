@@ -312,6 +312,12 @@ class DeviceDetailsScreen extends StatelessWidget {
               icon: const Icon(Icons.map),
               label: const Text('Track Location'),
             ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () => Get.toNamed(Routes.deviceWifi),
+              icon: const Icon(Icons.wifi),
+              label: const Text('Change Collar Wi-Fi'),
+            ),
           ],
         );
       }),

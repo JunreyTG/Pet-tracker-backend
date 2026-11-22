@@ -4,7 +4,7 @@ from time import monotonic
 import httpx
 
 from app.models.entities import Location
-from app.schemas.places import PlaceOptionResponse, PlaceSearchResponse
+from app.schemas.places import PlaceOptionResponse, PlaceReverseResponse, PlaceSearchResponse
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ class PlaceService:
     search_cache_ttl_seconds = 60 * 60 * 24
     _psgc_cache: dict[str, tuple[float, list[object]]] = {}
     _search_cache: dict[str, tuple[float, list[PlaceSearchResponse]]] = {}
+    _reverse_cache: dict[str, tuple[float, PlaceReverseResponse]] = {}
 
     def list_countries(self) -> list[PlaceOptionResponse]:
         return [PlaceOptionResponse(code="PH", name="Philippines")]
@@ -91,6 +92,45 @@ class PlaceService:
 
         self._search_cache[cache_key] = (monotonic() + self.search_cache_ttl_seconds, places)
         return places
+
+    def reverse_geocode(self, *, latitude: float, longitude: float) -> PlaceReverseResponse:
+        cache_key = f"{round(latitude, 5)},{round(longitude, 5)}"
+        cached = self._reverse_cache.get(cache_key)
+        if cached is not None and cached[0] > monotonic():
+            return cached[1]
+
+        try:
+            response = httpx.get(
+                "https://nominatim.openstreetmap.org/reverse",
+                params={"format": "json", "lat": latitude, "lon": longitude, "zoom": 16, "addressdetails": 1},
+                headers={"User-Agent": "pet-tracker-backend/0.1.0"},
+                timeout=15,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.info("Reverse geocoding failed: %s", exc.__class__.__name__)
+            raise PlaceServiceError("Reverse geocoding is not available.") from exc
+
+        if not isinstance(payload, dict) or not isinstance(payload.get("address"), dict):
+            raise PlaceServiceError("Reverse geocoding returned an invalid response.")
+
+        address = payload["address"]
+        result = PlaceReverseResponse(
+            display_name=str(payload.get("display_name", "")),
+            country=address.get("country"),
+            province=address.get("region") or address.get("state"),
+            city=address.get("city") or address.get("municipality") or address.get("town"),
+            barangay=(
+                address.get("village")
+                or address.get("suburb")
+                or address.get("quarter")
+                or address.get("neighbourhood")
+            ),
+            location=Location(latitude=latitude, longitude=longitude),
+        )
+        self._reverse_cache[cache_key] = (monotonic() + self.search_cache_ttl_seconds, result)
+        return result
 
     def _get_psgc_options(self, path: str) -> list[PlaceOptionResponse]:
         payload = self._get_psgc_payload(path)

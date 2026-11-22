@@ -1,4 +1,5 @@
 #include <ArduinoJson.h>
+#include <DNSServer.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <TinyGPSPlus.h>
@@ -21,8 +22,10 @@ constexpr char NtfyTopic[] = ""; // Optional: leave blank for app notifications 
 constexpr char FirmwareVersion[] = "1.1.0";
 constexpr char AccessHeader[] = "X-Tracker-Key";
 constexpr uint8_t GpsRx = 4, GpsTx = 5, Led = 8;
-constexpr uint32_t FixMaxAge = 5000, WifiRetryInterval = 30000;
+constexpr uint8_t GpsLedPin = 6, WifiLedPin = 7, ChargeLedPin = 10;
+constexpr uint32_t FixMaxAge = 5000, WifiRetryInterval = 30000, WifiConnectTimeoutMs = 15000;
 constexpr size_t TrailSize = 120;
+constexpr byte DnsPort = 53;
 
 struct Point { double lat, lng; };
 struct Home { double lat, lng, radius; };
@@ -30,13 +33,14 @@ HardwareSerial gpsSerial(1);
 TinyGPSPlus gps;
 Preferences prefs;
 WebServer server(80);
+DNSServer dnsServer;
 String deviceId, dashboardKey, ssid, wifiPassword, deviceSecret;
 Home home{0, 0, 50};
 Point trail[TrailSize];
 size_t trailHead = 0, trailCount = 0;
 uint32_t lastTrail = 0, lastWifiRetry = 0, nextReport = 0;
 bool homeSet = false, fenceKnown = false, outside = false, storageReady = false;
-bool stationConnected = false;
+bool stationConnected = false, apMode = false;
 int lastCloudCode = 0;
 
 bool hasFix() {
@@ -250,10 +254,111 @@ void handleRadius() {
   saveHome({home.lat, home.lng, radius});
 }
 
+// Lets an already-connected collar be switched to a different Wi-Fi network
+// (e.g. a new router) without having to fail its current connection first.
+void handleWifiUpdate() {
+  if (!authorizedLocalEdit()) { sendText(403, "Enter your local dashboard key."); return; }
+  const String newSsid = server.arg("ssid");
+  const String newPassword = server.arg("password");
+  if (newSsid.isEmpty()) { sendText(400, "Wi-Fi name is required."); return; }
+
+  JsonDocument doc;
+  doc["wifi_ssid"] = newSsid;
+  doc["wifi_password"] = newPassword;
+  doc["device_secret"] = deviceSecret;  // Preserve the existing reporting credential.
+  String body;
+  serializeJson(doc, body);
+  if (storageReady) prefs.putString("config", body);
+
+  sendText(200, "Saved. Restarting to connect to the new network.");
+  delay(1200);
+  ESP.restart();
+}
+
+// ---------- Wi-Fi setup portal (shown only when the saved network fails to connect) ----------
+
+String scannedNetworksHtml() {
+  String out;
+  const int count = WiFi.scanNetworks();
+  for (int i = 0; i < count && i < 20; i++) {
+    const String net = WiFi.SSID(i);
+    if (net.isEmpty()) continue;
+    out += "<button type=\"button\" class=\"net\" onclick=\"document.getElementById('s').value=this.textContent.split(' (')[0]\">" +
+           net + " (" + String(WiFi.RSSI(i)) + " dBm)</button>";
+  }
+  WiFi.scanDelete();
+  return out.isEmpty() ? "<p>No networks found nearby. Enter yours below.</p>" : out;
+}
+
+void handlePortalRoot() {
+  const String html =
+    "<!doctype html><html><head><meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>Pet Tracker Setup</title><style>"
+    "body{font-family:system-ui,sans-serif;margin:0;padding:20px;background:#0f172a;color:#f8fafc}"
+    "h1{font-size:20px}label{display:block;margin:14px 0 6px;font-weight:600}"
+    "input{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#fff;font-size:16px}"
+    "button.net{display:block;width:100%;text-align:left;margin:6px 0;padding:10px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#fff}"
+    "button.submit{margin-top:18px;width:100%;padding:12px;border-radius:8px;border:none;background:#12b96a;color:#0f172a;font-weight:700;font-size:16px}"
+    "</style></head><body>"
+    "<h1>Pet Tracker Wi-Fi Setup</h1>"
+    "<p>Could not connect to the saved Wi-Fi network. Pick yours below or type it in.</p>"
+    "<form method='POST' action='/save'>"
+    "<label>Available networks</label>" + scannedNetworksHtml() +
+    "<label>Wi-Fi name (SSID)</label><input id='s' name='ssid' required maxlength='32' autocomplete='off'>"
+    "<label>Wi-Fi password</label><input name='password' type='password' maxlength='64' autocomplete='off'>"
+    "<button class='submit' type='submit'>Save &amp; Restart</button>"
+    "</form></body></html>";
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "text/html; charset=utf-8", html);
+}
+
+void handlePortalSave() {
+  const String newSsid = server.arg("ssid");
+  const String newPassword = server.arg("password");
+  if (newSsid.isEmpty()) { sendText(400, "Wi-Fi name is required."); return; }
+
+  JsonDocument doc;
+  doc["wifi_ssid"] = newSsid;
+  doc["wifi_password"] = newPassword;
+  doc["device_secret"] = deviceSecret;  // Preserve the existing reporting credential.
+  String body;
+  serializeJson(doc, body);
+  if (storageReady) prefs.putString("config", body);
+
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "text/html; charset=utf-8",
+    "<!doctype html><html><body style='font-family:system-ui,sans-serif;padding:20px;background:#0f172a;color:#f8fafc'>"
+    "<h2>Saved.</h2><p>Restarting to connect to \"" + newSsid + "\"&hellip;</p></body></html>");
+  delay(1500);
+  ESP.restart();
+}
+
+void startCaptivePortal() {
+  apMode = true;
+  WiFi.mode(WIFI_AP);
+  char apSsid[24];
+  const int suffixStart = deviceId.length() > 4 ? deviceId.length() - 4 : 0;
+  snprintf(apSsid, sizeof(apSsid), "PetTracker-%s", deviceId.c_str() + suffixStart);
+  WiFi.softAP(apSsid);
+  dnsServer.start(DnsPort, "*", WiFi.softAPIP());
+  Serial.printf("Wi-Fi connect failed. Setup hotspot \"%s\" started. Open http://%s/\n",
+                apSsid, WiFi.softAPIP().toString().c_str());
+
+  server.on("/", HTTP_GET, handlePortalRoot);
+  server.on("/save", HTTP_POST, handlePortalSave);
+  server.onNotFound(handlePortalRoot);  // Catches captive-portal detection URLs on phones/laptops.
+  server.begin();
+}
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
   pinMode(Led, OUTPUT);
+  pinMode(GpsLedPin, OUTPUT);
+  pinMode(WifiLedPin, OUTPUT);
+  pinMode(ChargeLedPin, OUTPUT);
+  digitalWrite(ChargeLedPin, LOW);  // Needs the TP4056 CHRG/STDBY pins wired to GPIO 0/1 to mean anything; off until then.
   gpsSerial.setRxBufferSize(8192);
   gpsSerial.begin(9600, SERIAL_8N1, GpsRx, GpsTx);
 
@@ -276,24 +381,51 @@ void setup() {
   if (!dashboardKey.isEmpty()) Serial.printf("Local dashboard key: %s\n", dashboardKey.c_str());
   if (deviceSecret.isEmpty()) Serial.println("No reporting credential configured.");
   lastWifiRetry = millis();
+  bool connected = false;
   if (ssid.isEmpty()) {
-    Serial.println("No Wi-Fi configured. Set ConfiguredWifiSsid and ConfiguredWifiPassword before flashing.");
+    Serial.println("No Wi-Fi configured. Starting setup hotspot.");
   } else {
     WiFi.setAutoReconnect(true);
     WiFi.begin(ssid.c_str(), wifiPassword.c_str());
+    Serial.print("Connecting to Wi-Fi");
+    const uint32_t attemptStart = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - attemptStart < WifiConnectTimeoutMs) {
+      delay(250);
+      Serial.print(".");
+    }
+    Serial.println();
+    connected = WiFi.status() == WL_CONNECTED;
+    if (!connected) Serial.println("Could not connect to the saved Wi-Fi network.");
   }
 
   const char* headers[] = {AccessHeader};
   server.collectHeaders(headers, 1);
-  server.on("/", HTTP_GET, [] { server.send_P(200, "text/html; charset=utf-8", Dashboard); });
-  server.on("/api/status", HTTP_GET, handleStatus);
-  server.on("/api/trail", HTTP_GET, handleTrail);
-  server.on("/api/sethome", HTTP_POST, handleSetHome);
-  server.on("/api/radius", HTTP_POST, handleRadius);
-  server.begin();
+
+  if (connected) {
+    server.on("/", HTTP_GET, [] { server.send_P(200, "text/html; charset=utf-8", Dashboard); });
+    server.on("/api/status", HTTP_GET, handleStatus);
+    server.on("/api/trail", HTTP_GET, handleTrail);
+    server.on("/api/sethome", HTTP_POST, handleSetHome);
+    server.on("/api/radius", HTTP_POST, handleRadius);
+    server.on("/api/wifi", HTTP_POST, handleWifiUpdate);
+    server.begin();
+  } else {
+    startCaptivePortal();
+  }
 }
 
 void loop() {
+  if (apMode) {
+    dnsServer.processNextRequest();
+    server.handleClient();
+    const bool fastBlink = (millis() / 150) % 2;
+    digitalWrite(WifiLedPin, fastBlink ? HIGH : LOW);  // fast blink = needs Wi-Fi setup
+    digitalWrite(GpsLedPin, LOW);
+    digitalWrite(Led, fastBlink ? LOW : HIGH);
+    delay(2);
+    return;
+  }
+
   while (gpsSerial.available()) gps.encode(gpsSerial.read());
   const uint32_t now = millis();
   maintainWifi(now);
@@ -301,6 +433,11 @@ void loop() {
   updateLocalTracking(now);
   const bool blink = outside ? (now / 150) % 2 : hasFix() ? now % 2000 < 80 : (now / 1000) % 2;
   digitalWrite(Led, blink ? LOW : HIGH);
+
+  const bool statusBlink = (now / 500) % 2;  // shared 1 Hz blink for "in progress" states
+  digitalWrite(GpsLedPin, (hasFix() || statusBlink) ? HIGH : LOW);
+  digitalWrite(WifiLedPin, (WiFi.status() == WL_CONNECTED || statusBlink) ? HIGH : LOW);
+
   reportCloud(now);
   delay(2);
 }

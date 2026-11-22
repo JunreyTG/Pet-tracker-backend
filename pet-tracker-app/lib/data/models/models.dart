@@ -116,6 +116,37 @@ class PlaceModel {
   }
 }
 
+class PlaceReverseModel {
+  PlaceReverseModel({
+    required this.displayName,
+    this.country,
+    this.province,
+    this.city,
+    this.barangay,
+    required this.location,
+  });
+  final String displayName;
+  final String? country;
+  final String? province;
+  final String? city;
+  final String? barangay;
+  final LocationModel location;
+  factory PlaceReverseModel.fromJson(Map<String, dynamic> json) {
+    final locationMap = parseMapOrNull(json['location']);
+    if (locationMap == null) {
+      throw const FormatException('Missing "location" in place data.');
+    }
+    return PlaceReverseModel(
+      displayName: json['display_name'] ?? '',
+      country: json['country'],
+      province: json['province'],
+      city: json['city'],
+      barangay: json['barangay'],
+      location: LocationModel.fromJson(locationMap),
+    );
+  }
+}
+
 class PlaceOptionModel {
   PlaceOptionModel({required this.code, required this.name});
   final String code;

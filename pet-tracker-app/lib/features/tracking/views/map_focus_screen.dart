@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:get/get.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -168,6 +169,117 @@ class _MapFocusScreenState extends State<MapFocusScreen> {
     } finally {
       if (mounted) setState(() => _placeLoading = false);
     }
+  }
+
+  Future<void> _useCurrentLocation() async {
+    setState(() {
+      _placeLoading = true;
+      _error = '';
+    });
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw 'Turn on location services to use your device\'s GPS.';
+      }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        throw 'Location permission was denied. Enable it in system settings to use this device\'s GPS.';
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.best,
+        ),
+      );
+      final here = LatLng(position.latitude, position.longitude);
+      setState(() => _focusCenter = here);
+      _mapController.move(here, 17);
+
+      // Best-effort: auto-fill the administrative area fields the save
+      // action requires. The pinned point above is already the device's
+      // exact GPS fix regardless of whether this matching succeeds.
+      final reverse = await _placesRepo.reverse(
+        position.latitude,
+        position.longitude,
+      );
+      await _matchReverseResult(reverse);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      }
+    } finally {
+      if (mounted) setState(() => _placeLoading = false);
+    }
+  }
+
+  PlaceOptionModel? _findMatch(List<PlaceOptionModel> options, String? name) {
+    final needle = (name ?? '').trim().toLowerCase();
+    if (needle.isEmpty) return null;
+    for (final option in options) {
+      final hay = option.name.trim().toLowerCase();
+      if (hay == needle || hay.contains(needle) || needle.contains(hay)) {
+        return option;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _matchReverseResult(PlaceReverseModel reverse) async {
+    if (_countries.isEmpty) _countries = await _placesRepo.countries();
+    final country =
+        _findMatch(_countries, reverse.country) ??
+        (_countries.isNotEmpty ? _countries.first : null);
+    if (country == null) {
+      setState(
+        () => _error =
+            'Your exact location is pinned above. Select the area manually below to finish.',
+      );
+      return;
+    }
+    setState(() {
+      _country = country;
+      _province = null;
+      _city = null;
+      _barangay = null;
+      _provinces = [];
+      _cities = [];
+      _barangays = [];
+    });
+
+    _provinces = await _placesRepo.provinces(country.code);
+    final province = _findMatch(_provinces, reverse.province);
+    if (province == null) {
+      setState(
+        () => _error =
+            'Your exact location is pinned above. Select the province, city, and barangay manually below to finish.',
+      );
+      return;
+    }
+    setState(() => _province = province);
+
+    _cities = await _placesRepo.cities(province.code);
+    final city = _findMatch(_cities, reverse.city);
+    if (city == null) {
+      setState(
+        () => _error =
+            'Your exact location is pinned above. Select the city and barangay manually below to finish.',
+      );
+      return;
+    }
+    setState(() => _city = city);
+
+    _barangays = await _placesRepo.barangays(city.code);
+    final barangay = _findMatch(_barangays, reverse.barangay);
+    setState(() {
+      _barangay = barangay;
+      _error = barangay == null
+          ? 'Your exact location is pinned above. Select the barangay manually below to finish.'
+          : '';
+    });
   }
 
   Future<void> _saveFocus() async {
@@ -355,6 +467,34 @@ class _MapFocusScreenState extends State<MapFocusScreen> {
                     ],
                   ),
                 ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Use device GPS for a direct, accurate fix
+            FilledButton.icon(
+              onPressed: _placeLoading ? null : _useCurrentLocation,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                backgroundColor: AppTheme.green,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              icon: _placeLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.my_location),
+              label: const Text(
+                'Use My Current Location',
+                style: TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
 

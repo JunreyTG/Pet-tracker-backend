@@ -249,6 +249,15 @@ class PlaceRepository {
         await _api.get('/places/barangays', query: {'city_code': cityCode}),
         PlaceOptionModel.fromJson,
       );
+  Future<PlaceReverseModel> reverse(double latitude, double longitude) async =>
+      PlaceReverseModel.fromJson(
+        Map<String, dynamic>.from(
+          await _api.get(
+            '/places/reverse',
+            query: {'lat': '$latitude', 'lon': '$longitude'},
+          ),
+        ),
+      );
   Future<List<PlaceModel>> search({
     required String country,
     required String province,
